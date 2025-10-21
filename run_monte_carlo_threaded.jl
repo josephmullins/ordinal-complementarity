@@ -11,6 +11,8 @@ results = map(sample_sizes) do N
     seed0 = 1010 + N
     r = monte_carlo_simulation_threaded(p; N, nboot = 10_000,seed0)
     println("Finished doing sample size $N")
+    @show length(r[2])
+    @show sum(r[2])
     return r
 end
 

@@ -1,0 +1,12 @@
+Finished doing sample size 500
+length(r[2]) = 10000
+sum(r[2]) = 0.0
+Finished doing sample size 1000
+length(r[2]) = 10000
+sum(r[2]) = 0.0
+Finished doing sample size 5000
+length(r[2]) = 10000
+sum(r[2]) = 0.0
+Finished doing sample size 10000
+length(r[2]) = 10000
+sum(r[2]) = 0.0
