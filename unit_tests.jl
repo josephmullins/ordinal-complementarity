@@ -1,31 +1,39 @@
 include("estimation.jl")
 include("parameters.jl")
+include("inference.jl")
 using LinearAlgebra
 
 # simulate some data from default parameters
 p = default_model()
-N = 2_000
+N = 500
+
 data = simulate_data(N,p)
+@time data = simulate_data(N,p)
 
 # jointly test the posterior calculation and the max step on π0
 # write as a function, looks like it works.
 Q = zeros(3,3,3,N)
-expectation_step!(Q,p,data)
-reshape(sum(Q,dims=[1,4])/1000,3,3)
+ll = expectation_step(Q,p,data)
+@time expectation_step(Q,p,data)
 
 # test the max step on P_I:
 P_I = update_P_I(Q,data.X_I)
 P_θ = update_P_θ(Q,data.Y,data.X_θ)
+@time P_I = update_P_I(Q,data.X_I)
+@time P_θ = update_P_θ(Q,data.Y,data.X_θ)
 
-Π = update_Π(Q)
+Π = update_Π(Q);
+@time update_Π(Q);
+
 # test the max step on Π
 
 p_est = expectation_maximization(data, p)
+@code_warntype expectation_maximization(data, p);
 
 #expectation_step!(Q,p,data)
 expectation_step!(Q,p_est,data)
 
-dL = get_score(Q, p_est.Π)
+@time dL = get_score(Q, p_est.Π);
 
 
 # Monte-Carlo Simulation
@@ -33,7 +41,7 @@ dL = get_score(Q, p_est.Π)
 
 
 
-T, Ω, Σ = get_test_stat(Q,p_est,data)
+@time get_test_stat(Q,p_est,data);
 crit_value(Hermitian(Ω),0.05)
 
 S = get_S(3,3)

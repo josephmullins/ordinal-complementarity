@@ -1,6 +1,7 @@
 #!/bin/bash -l        
 #SBATCH --time=1:00:00
-#SBATCH --ntasks=100
+#SBATCH --ntasks=1              # Just 1 task (default, could omit)
+#SBATCH --cpus-per-task=100     # 100 CPU cores for threading
 #SBATCH --mem=100g
 #SBATCH --tmp=100g
 #SBATCH --mail-type=ALL  
