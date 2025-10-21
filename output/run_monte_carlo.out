@@ -1,12 +1,19 @@
 Finished doing sample size 500
 length(r[2]) = 10000
-sum(r[2]) = 0.0
+sum(r[2]) = 38802.453713026756
 Finished doing sample size 1000
 length(r[2]) = 10000
-sum(r[2]) = 0.0
+sum(r[2]) = 37445.35621021358
 Finished doing sample size 5000
 length(r[2]) = 10000
-sum(r[2]) = 0.0
+sum(r[2]) = 38662.59852095657
 Finished doing sample size 10000
 length(r[2]) = 10000
-sum(r[2]) = 0.0
+sum(r[2]) = 38593.916039135554
+pure virtual method called
+terminate called without an active exception
+
+[744131] signal (6.-6): Aborted
+in expression starting at none:0
+gsignal at /lib64/libc.so.6 (unknown line)
+abort at /lib64/libc.so.6 (unknown line)

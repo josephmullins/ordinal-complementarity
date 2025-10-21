@@ -76,11 +76,16 @@ function monte_carlo_simulation_threaded(p;N = 1_000, nboot = 500, seed0 = 10202
     Reject = zeros(nboot)
     cboot = zeros(nboot)
     chunks = Iterators.partition(1:nboot,cld(nboot,Threads.nthreads()))
-    ch_id = 0
-    tasks = map(chunks) do chunk
+    tasks = map(enumerate(chunks)) do (ch_id, chunk)
         seedb = seed0 + ch_id
-        Threads.@spawn monte_carlo_simulation_chunk!(chunk,Πboot,Tboot,cboot,Reject,p,N,seedb)
-        ch_id += 1
+        Threads.@spawn begin
+            try
+                monte_carlo_simulation_chunk!(chunk,Πboot,Tboot,cboot,Reject,p,N,seedb)
+            catch e
+                @error "Task failed" exception=(e, catch_backtrace())
+                rethrow(e)
+            end
+        end
     end
     fetch.(tasks)
     return mean(Reject), Tboot, cboot, Πboot
