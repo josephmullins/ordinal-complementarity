@@ -67,3 +67,35 @@ function monte_carlo_simulation(p;N = 1_000, nboot = 500, seed0 = 102025)
     end
     return mean(Reject), Tboot, cboot, Πboot
 end
+
+function monte_carlo_simulation_threaded(p;N = 1_000, nboot = 500, seed0 = 102025)
+    # p containts "true" parameters
+    np = 3 * 3 * 2 #<- need to update this whatever is in p
+    Πboot = zeros(np,nboot)
+    Tboot = zeros(nboot)
+    Reject = zeros(nboot)
+    cboot = zeros(nboot)
+    chunks = Iterators.partition(1:nboot,cld(nboot,Threads.nthreads()))
+    ch_id = 0
+    tasks = map(chunks) do chunk
+        seedb = seed0 + ch_id
+        Threads.@spawn monte_carlo_simulation_chunk!(chunk,Πboot,Tboot,cboot,Reject,p,N,seedb)
+        ch_id += 1
+    end
+    fetch.(tasks)
+    return mean(Reject), Tboot, cboot, Πboot
+end
+
+function monte_carlo_simulation_chunk!(chunk,Πboot,Tboot,cboot,Reject,p,N,seed0)
+    Random.seed!(seed0)
+    Q = zeros(3,3,3,N) #<- need to update this as well!
+    for b in chunk
+        data_sim = simulate_data(N,p)
+        p_boot = expectation_maximization(data_sim, p)
+        Πboot[:,b] = p_boot.Π[1:2,:,:][:]
+        Tboot[b],Ω,_ = get_test_stat(Q, p_boot, data_sim)
+        c_α = crit_value(Hermitian(Ω),0.05)
+        Reject[b] = Tboot[b] > c_α
+        cboot[b] = c_α
+    end
+end
