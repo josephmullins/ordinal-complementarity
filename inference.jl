@@ -36,14 +36,22 @@ function get_test_stat(Q,p_est,data)
     return norm(Tvec), Ω, Σ
 end
 
-function crit_value(Ω,α; nsim = 100_000)
-    F = MvNormal(Ω)
+function crit_value(Ω, α; nsim = 100_000)
+    # Pre-compute Cholesky factorization once
+    L = cholesky(Hermitian(Ω)).L
+    d = size(Ω, 1)
+    
     T = zeros(nsim)
+    z = zeros(d)      # Standard normals
+    Tvec = zeros(d)   # Transformed result
+    
     for r in 1:nsim
-        Tvec = rand(F)
-        T[r] = sum(min.(0.,Tvec).^2)
+        randn!(z)           # Fill with standard normals - truly allocation-free
+        mul!(Tvec, L, z)    # Tvec = L * z (in-place matrix-vector multiply)
+        T[r] = sum(x -> min(0.0, x)^2, Tvec)
     end
-    return quantile(T,1 - α)
+    
+    return quantile(T, 1 - α)
 end
 
 function monte_carlo_simulation(p;N = 1_000, nboot = 500, seed0 = 102025)
