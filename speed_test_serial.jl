@@ -5,6 +5,6 @@ using LinearAlgebra, Distributions, DelimitedFiles
 
 p = default_model()
 
-N = 500
+N = 2_000
 monte_carlo_simulation(p; N, nboot = Threads.nthreads())
-@time monte_carlo_simulation(p; N, nboot = 50)
+@time monte_carlo_simulation(p; N, nboot = 100)
