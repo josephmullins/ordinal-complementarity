@@ -36,26 +36,26 @@ function get_test_stat(Q,p_est,data)
     return norm(Tvec), Ω, Σ
 end
 
-function crit_value(Ω, α; nsim = 100_000)
+function crit_value(Ω, α; nsim = 100_000, rng::AbstractRNG=Random.default_rng())
     # Pre-compute Cholesky factorization once
     L = cholesky(Hermitian(Ω)).L
     d = size(Ω, 1)
-    
+
     T = zeros(nsim)
     z = zeros(d)      # Standard normals
     Tvec = zeros(d)   # Transformed result
-    
+
     for r in 1:nsim
-        randn!(z)           # Fill with standard normals - truly allocation-free
+        randn!(rng, z)      # Fill with standard normals - truly allocation-free
         mul!(Tvec, L, z)    # Tvec = L * z (in-place matrix-vector multiply)
         T[r] = sum(x -> min(0.0, x)^2, Tvec)
     end
-    
+
     return quantile(T, 1 - α)
 end
 
 function monte_carlo_simulation(p;N = 1_000, nboot = 500, seed0 = 102025)
-    Random.seed!(seed0)
+    rng = MersenneTwister(seed0)
     # p containts "true" parameters
     np = 3 * 3 * 2 #<- need to update this whatever is in p
     Q = zeros(3,3,3,N) #<- need to update this as well!
@@ -65,11 +65,11 @@ function monte_carlo_simulation(p;N = 1_000, nboot = 500, seed0 = 102025)
     cboot = zeros(nboot)
     for b in 1:nboot
         #println(" Doing trial $b")
-        data_sim = simulate_data(N,p)
+        data_sim = simulate_data(N,p,rng)
         p_boot = expectation_maximization(data_sim, p)
         Πboot[:,b] = p_boot.Π[1:2,:,:][:]
         Tboot[b],Ω,_ = get_test_stat(Q, p_boot, data_sim)
-        c_α = crit_value(Hermitian(Ω),0.05)
+        c_α = crit_value(Hermitian(Ω),0.05; rng=rng)
         Reject[b] = Tboot[b] > c_α
         cboot[b] = c_α
     end
@@ -100,14 +100,14 @@ function monte_carlo_simulation_threaded(p;N = 1_000, nboot = 500, seed0 = 10202
 end
 
 function monte_carlo_simulation_chunk!(chunk,Πboot,Tboot,cboot,Reject,p,N,seed0)
-    Random.seed!(seed0)
+    rng = MersenneTwister(seed0)
     Q = zeros(3,3,3,N) #<- need to update this as well!
     for b in chunk
-        data_sim = simulate_data(N,p)
+        data_sim = simulate_data(N,p,rng)
         p_boot = expectation_maximization(data_sim, p)
         Πboot[:,b] = p_boot.Π[1:2,:,:][:]
         Tboot[b],Ω,_ = get_test_stat(Q, p_boot, data_sim)
-        c_α = crit_value(Hermitian(Ω),0.05)
+        c_α = crit_value(Hermitian(Ω),0.05; rng=rng)
         Reject[b] = Tboot[b] > c_α
         cboot[b] = c_α
     end

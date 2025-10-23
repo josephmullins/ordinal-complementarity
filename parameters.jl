@@ -1,4 +1,4 @@
-using Distributions
+using Distributions, Random
 
 function default_model()
     r_θ = 3
@@ -37,7 +37,7 @@ function threshold_transitions(c,γ,Igrid,θgrid)
     return Π
 end
 
-function simulate_data(N,p)
+function simulate_data(N,p,rng::AbstractRNG=Random.default_rng())
     (;π0,Π,r_θ,r_I,P_I,P_θ) = p
     F0 = Categorical(π0[:])
     Π_dist = [Categorical(Π[:,kθ,kI]) for kθ in axes(Π,2), kI in axes(Π,3)]
@@ -48,11 +48,11 @@ function simulate_data(N,p)
     X_θ = zeros(Int64,N)
     Y = zeros(Int64,N)
     for n in 1:N
-        kθ,kI = Tuple(idx_inv[rand(F0)])
-        kθ_next = rand(Π_dist[kθ,kI])
-        X_I[n] = rand(P_I_dist[kI])
-        X_θ[n] = rand(P_θ_dist[kθ])
-        Y[n] = rand(P_θ_dist[kθ_next])
+        kθ,kI = Tuple(idx_inv[rand(rng, F0)])
+        kθ_next = rand(rng, Π_dist[kθ,kI])
+        X_I[n] = rand(rng, P_I_dist[kI])
+        X_θ[n] = rand(rng, P_θ_dist[kθ])
+        Y[n] = rand(rng, P_θ_dist[kθ_next])
     end
     return (;X_I,X_θ,Y)
 end
