@@ -39,8 +39,8 @@ println("-" ^ 80)
 # Test parameters
 p = default_model()
 N = 1_000
-nboot_small = 100
-nboot_large = 500
+nboot_small = 500
+nboot_large = 2_000
 
 # Warm-up
 println("\nWarming up Julia (compiling functions)...")

@@ -1,0 +1,61 @@
+==========================================
+Starting benchmark with 4 threads
+Job ID: 42596804
+Array Task ID: 4
+Node: acn60
+==========================================
+
+================================================================================
+CLUSTER BENCHMARK - Thread Scaling Test
+================================================================================
+
+System Information:
+--------------------------------------------------------------------------------
+Julia version: 1.9.3
+Julia threads: 4
+BLAS threads:  1
+BLAS library:  lbt
+Hostname:      acn60
+CPU(s):              128
+Thread(s) per core:  1
+Core(s) per socket:  64
+Model name:          AMD EPYC 7763 64-Core Processor
+--------------------------------------------------------------------------------
+
+Warming up Julia (compiling functions)...
+✓ Warm-up complete
+
+================================================================================
+TEST 1: Small workload (nboot=100)
+================================================================================
+Time:               8.291 seconds
+Time per bootstrap: 82.91 ms
+Rejection rate:     0.03
+Efficiency:         100.0% (ideal: 100%)
+
+================================================================================
+TEST 2: Large workload (nboot=500)
+================================================================================
+Time:               48.222 seconds
+Time per bootstrap: 96.44 ms
+Rejection rate:     0.052
+Efficiency:         100.0% (ideal: 100%)
+
+================================================================================
+SUMMARY
+================================================================================
+Configuration: 4 Julia threads, 1 BLAS threads
+Small workload: 8.291s for 100 bootstraps
+Large workload: 48.222s for 500 bootstraps
+
+Recommendations:
+✓ Good threading efficiency (301.5%)
+
+To test different thread counts, run:
+  julia -t 1 cluster_benchmark.jl
+  julia -t 4 cluster_benchmark.jl
+  julia -t 8 cluster_benchmark.jl
+  julia -t 16 cluster_benchmark.jl
+================================================================================
+
+Benchmark completed at Thu Oct 23 12:53:48 CDT 2025
