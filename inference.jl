@@ -1,5 +1,9 @@
 using LinearAlgebra, Distributions, Random
 
+# Set BLAS to single-threaded to avoid oversubscription with Julia threading
+# For small matrices, single-threaded BLAS + Julia threads is much faster
+LinearAlgebra.BLAS.set_num_threads(1)
+
 function get_S(r_θ,r_I)
     p_idx = LinearIndices((r_θ-1,r_θ,r_I))
     np = prod(size(p_idx))
@@ -88,27 +92,50 @@ function monte_carlo_simulation_threaded(p;N = 1_000, nboot = 500, seed0 = 10202
         seedb = seed0 + ch_id
         Threads.@spawn begin
             try
-                monte_carlo_simulation_chunk!(chunk,Πboot,Tboot,cboot,Reject,p,N,seedb)
+                monte_carlo_simulation_chunk(chunk,p,N,seedb)
             catch e
                 @error "Task failed" exception=(e, catch_backtrace())
                 rethrow(e)
             end
         end
     end
-    fetch.(tasks)
+    results = fetch.(tasks)
+
+    # Copy results from thread-local buffers to output arrays
+    for (chunk, result) in zip(chunks, results)
+        Πboot_local, Tboot_local, cboot_local, Reject_local = result
+        for (idx, b) in enumerate(chunk)
+            Πboot[:,b] = Πboot_local[:,idx]
+            Tboot[b] = Tboot_local[idx]
+            cboot[b] = cboot_local[idx]
+            Reject[b] = Reject_local[idx]
+        end
+    end
+
     return mean(Reject), Tboot, cboot, Πboot
 end
 
-function monte_carlo_simulation_chunk!(chunk,Πboot,Tboot,cboot,Reject,p,N,seed0)
+function monte_carlo_simulation_chunk(chunk,p,N,seed0)
     rng = MersenneTwister(seed0)
-    Q = zeros(3,3,3,N) #<- need to update this as well!
-    for b in chunk
+    np = 3 * 3 * 2
+    chunk_size = length(chunk)
+
+    # Thread-local buffers
+    Πboot_local = zeros(np, chunk_size)
+    Tboot_local = zeros(chunk_size)
+    cboot_local = zeros(chunk_size)
+    Reject_local = zeros(chunk_size)
+    Q = zeros(3,3,3,N)
+
+    for (idx, b) in enumerate(chunk)
         data_sim = simulate_data(N,p,rng)
         p_boot = expectation_maximization(data_sim, p)
-        Πboot[:,b] = p_boot.Π[1:2,:,:][:]
-        Tboot[b],Ω,_ = get_test_stat(Q, p_boot, data_sim)
+        Πboot_local[:,idx] = p_boot.Π[1:2,:,:][:]
+        Tboot_local[idx],Ω,_ = get_test_stat(Q, p_boot, data_sim)
         c_α = crit_value(Hermitian(Ω),0.05; rng=rng)
-        Reject[b] = Tboot[b] > c_α
-        cboot[b] = c_α
+        Reject_local[idx] = Tboot_local[idx] > c_α
+        cboot_local[idx] = c_α
     end
+
+    return Πboot_local, Tboot_local, cboot_local, Reject_local
 end
