@@ -25,7 +25,7 @@ echo "=========================================="
 cd ~/ordinal-complementarity
 
 # Run the benchmark
-$OLDHOME/julia-1.9.3/bin/julia -t ${JULIA_NUM_THREADS} cluster_benchmark.jl
+$OLDHOME/julia-1.9.3/bin/julia -t ${JULIA_NUM_THREADS} benchmarks/cluster_benchmark.jl
 
 echo ""
 echo "Benchmark completed at $(date)"

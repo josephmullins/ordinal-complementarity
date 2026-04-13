@@ -9,6 +9,6 @@
 #SBATCH --output=output/run_speed_test.out
 
 cd ~/ordinal-complementarity
-$OLDHOME/julia-1.9.3/bin/julia -t 20 speed_test.jl
-$OLDHOME/julia-1.9.3/bin/julia -t 50 speed_test.jl
-$OLDHOME/julia-1.9.3/bin/julia -t 100 speed_test.jl
+$OLDHOME/julia-1.9.3/bin/julia -t 20 benchmarks/speed_test.jl
+$OLDHOME/julia-1.9.3/bin/julia -t 50 benchmarks/speed_test.jl
+$OLDHOME/julia-1.9.3/bin/julia -t 100 benchmarks/speed_test.jl

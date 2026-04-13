@@ -1,6 +1,6 @@
-include("parameters.jl")
-include("estimation.jl")
-include("inference.jl")
+include(joinpath(@__DIR__, "..", "src", "parameters.jl"))
+include(joinpath(@__DIR__, "..", "src", "estimation.jl"))
+include(joinpath(@__DIR__, "..", "src", "inference.jl"))
 using LinearAlgebra, Distributions
 
 p = default_model()

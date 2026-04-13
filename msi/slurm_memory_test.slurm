@@ -25,9 +25,9 @@ cd ~/ordinal-complementarity
 export JULIA_NUM_THREADS=4
 
 cat > temp_mem_test.jl <<'EOF'
-include("parameters.jl")
-include("estimation.jl")
-include("inference.jl")
+include("src/parameters.jl")
+include("src/estimation.jl")
+include("src/inference.jl")
 using LinearAlgebra, Distributions
 
 p = default_model()

@@ -29,9 +29,9 @@ for THREADS in 1 4 8 16 32; do
 
     # Create a temporary test script with the right nboot
     cat > temp_test_${THREADS}.jl <<EOF
-include("parameters.jl")
-include("estimation.jl")
-include("inference.jl")
+include("src/parameters.jl")
+include("src/estimation.jl")
+include("src/inference.jl")
 using LinearAlgebra, Distributions
 
 p = default_model()

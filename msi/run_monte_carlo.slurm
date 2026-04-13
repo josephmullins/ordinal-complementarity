@@ -8,4 +8,4 @@
 #SBATCH --output=output/run_monte_carlo.out
 
 cd ~/ordinal-complementarity
-$OLDHOME/julia-1.9.3/bin/julia -t 50 run_monte_carlo_threaded.jl
+$OLDHOME/julia-1.9.3/bin/julia -t 50 scripts/run_monte_carlo_threaded.jl

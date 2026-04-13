@@ -1,6 +1,6 @@
-include("parameters.jl")
-include("estimation.jl")
-include("inference.jl")
+include(joinpath(@__DIR__, "..", "src", "parameters.jl"))
+include(joinpath(@__DIR__, "..", "src", "estimation.jl"))
+include(joinpath(@__DIR__, "..", "src", "inference.jl"))
 using LinearAlgebra, Distributions, DelimitedFiles
 
 p = default_model()
@@ -17,4 +17,4 @@ results = map(sample_sizes) do N
 end
 
 size_mc = [r[1] for r in results]
-writedlm("output/results/size_boot.csv",size_mc)
+writedlm(joinpath(dirname(@__DIR__), "output", "results", "size_boot.csv"), size_mc)
