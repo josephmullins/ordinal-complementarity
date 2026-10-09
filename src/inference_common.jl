@@ -197,7 +197,8 @@ function two_sided_modularity_test(D::AbstractMatrix, Π_vec::AbstractVector,
         T_super_sup = 0.0, T_sub_sup = 0.0, c_sup_super = 0.0, c_sup_sub = 0.0,
         reject_super_sup = false, reject_sub_sup = false,
         c_rsw_super = 0.0, c_rsw_sub = 0.0,
-        reject_super_rsw = false, reject_sub_rsw = false)
+        reject_super_rsw = false, reject_sub_rsw = false,
+        nslack_rsw_super = 0, nslack_rsw_sub = 0)
     mk = m[keep]; Vk = V[keep, keep]; dk = dV[keep]
     Dinv = diagm(1.0 ./ sqrt.(dk))
     Ω = Matrix(Symmetric(Dinv * Vk * Dinv))
@@ -211,8 +212,9 @@ function two_sided_modularity_test(D::AbstractMatrix, Π_vec::AbstractVector,
     T_sub_sup   = max(0.0, maximum(z))^2   # worst single substitutability-side violation
     csup = crit_value_sup(Hermitian(Ω), α; rng = rng)
     # ROMANO–SHAIKH–WOLF (2014) moment-selection critical values, both directions:
-    c_rsw_super = crit_value_rsw(Hermitian(Ω), z, α; direction = :super, rng = rng)
-    c_rsw_sub   = crit_value_rsw(Hermitian(Ω), z, α; direction = :sub,   rng = rng)
+    rsw_super = crit_value_rsw(Hermitian(Ω), z, α; direction = :super, rng = rng)
+    rsw_sub   = crit_value_rsw(Hermitian(Ω), z, α; direction = :sub,   rng = rng)
+    c_rsw_super = rsw_super.c; c_rsw_sub = rsw_sub.c
     return (; nrow = size(D, 1), n_used = length(keep), T_super, T_sub, c,
             reject_super = T_super > c, reject_sub = T_sub > c,
             n_comp, n_sub, n_comp_sig = count(>(1.96), z), n_sub_sig = count(<(-1.96), z),
@@ -223,5 +225,6 @@ function two_sided_modularity_test(D::AbstractMatrix, Π_vec::AbstractVector,
             reject_sub_sup   = T_sub_sup   > csup.c_sub,
             c_rsw_super, c_rsw_sub,
             reject_super_rsw = T_super > c_rsw_super,
-            reject_sub_rsw   = T_sub   > c_rsw_sub)
+            reject_sub_rsw   = T_sub   > c_rsw_sub,
+            nslack_rsw_super = rsw_super.n_slack, nslack_rsw_sub = rsw_sub.n_slack)
 end

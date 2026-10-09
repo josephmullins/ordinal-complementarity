@@ -101,16 +101,26 @@ end
 #   κ_β  = (1-β)-quantile of  max_j Z_j,  Z ~ N(0,Ω)   [correlation-aware slack]
 #   μ̂_β = (z - κ_β) ∨ 0   (:super)   /   (z + κ_β) ∧ 0   (:sub)
 #   crit = (1-(α-β))-quantile of  ‖W ∧ 0‖²  (:super) with W ~ N(μ̂_β, Ω)
-# If every moment is safely satisfied (μ̂_β strictly interior) return Inf
+# i.e. the centre is each moment's (1-β) simultaneous lower (:super) / upper
+# (:sub) confidence bound truncated at 0: moments whose bound lies strictly
+# inside the null are "slack" and are centred there, all others at 0 as in the
+# least-favourable null.  Shifting a centre into the null can only shrink the
+# simulated statistic, so crit ≤ c_lf, the LF crit at the same level 1-(α-β).
+# If every moment is slack (μ̂_β strictly interior) c = Inf
 # (auto fail-to-reject), matching RSW's (1 - 1{μ̂_β interior}) factor.
+#
+# Returns (; c, c_lf, κβ, n_slack).  The κ_β step, the RSW simulation and c_lf
+# all use the same draws (common random numbers), so c ≤ c_lf holds exactly in
+# simulation and any gap to the 1-α LF crit is the β level adjustment.
 # ─────────────────────────────────────────────────────────────────
 function crit_value_rsw(Ω, z::AbstractVector, α; direction::Symbol = :super,
-                        β::Real = α / 10, nsim = 50_000,
+                        β::Real = α / 10, nsim = 200_000,
                         rng::AbstractRNG = Random.default_rng())
     d = size(Ω, 1)
     L = cholesky(Hermitian(Ω)).L
     ζ = zeros(d); Lζ = zeros(d)
     # κ_β : simulated (1-β)-quantile of max_j Z_j
+    rng0 = copy(rng)
     mx = zeros(nsim)
     for r in 1:nsim
         randn!(rng, ζ); mul!(Lζ, L, ζ)
@@ -119,22 +129,28 @@ function crit_value_rsw(Ω, z::AbstractVector, α; direction::Symbol = :super,
     κβ = quantile(mx, 1 - β)
     if direction === :super
         μ = max.(z .- κβ, 0.0)
-        all(>(0.0), μ) && return Inf
+        n_slack = count(>(0.0), μ)
     else
         μ = min.(z .+ κβ, 0.0)
-        all(<(0.0), μ) && return Inf
+        n_slack = count(<(0.0), μ)
     end
-    T = zeros(nsim)
+    T = zeros(nsim); Tlf = zeros(nsim)
     for r in 1:nsim
-        randn!(rng, ζ); mul!(Lζ, L, ζ)
-        s = 0.0
+        randn!(rng0, ζ); mul!(Lζ, L, ζ)
+        s = 0.0; s0 = 0.0
         @inbounds for j in 1:d
             w = μ[j] + Lζ[j]
-            s += direction === :super ? min(0.0, w)^2 : max(0.0, w)^2
+            if direction === :super
+                s += min(0.0, w)^2; s0 += min(0.0, Lζ[j])^2
+            else
+                s += max(0.0, w)^2; s0 += max(0.0, Lζ[j])^2
+            end
         end
-        T[r] = s
+        T[r] = s; Tlf[r] = s0
     end
-    return quantile(T, 1 - (α - β))
+    c_lf = quantile(Tlf, 1 - (α - β))
+    c = n_slack == d ? Inf : quantile(T, 1 - (α - β))
+    return (; c, c_lf, κβ, n_slack)
 end
 
 # ─────────────────────────────────────────────────────────────────

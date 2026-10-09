@@ -151,7 +151,7 @@ function run_set(D, Π_vec, Vfree; α = 0.05)
     isempty(keep) && return (; nrow=size(D,1), n_used=0, T_super=0.0, T_sub=0.0, c=0.0,
         reject_super=false, reject_sub=false, n_comp, n_sub, n_comp_sig=0, n_sub_sig=0,
         worst_sub, strongest_comp, c_rsw_super=0.0, c_rsw_sub=0.0,
-        reject_super_rsw=false, reject_sub_rsw=false)
+        reject_super_rsw=false, reject_sub_rsw=false, nslack_super=0, nslack_sub=0)
     mk = m[keep]; Vk = V[keep, keep]; dk = dV[keep]
     Dinv = diagm(1.0 ./ sqrt.(dk))
     Ω = Matrix(Symmetric(Dinv * Vk * Dinv))
@@ -160,14 +160,16 @@ function run_set(D, Π_vec, Vfree; α = 0.05)
     T_super = sum(min.(0.0, z) .^ 2)
     T_sub   = sum(max.(0.0, z) .^ 2)
     c = crit_value(Hermitian(Ω), α; rng = rng)     # symmetric LF null ⇒ same c
-    c_rsw_super = crit_value_rsw(Hermitian(Ω), z, α; direction = :super, rng = rng)
-    c_rsw_sub   = crit_value_rsw(Hermitian(Ω), z, α; direction = :sub,   rng = rng)
+    rsw_super = crit_value_rsw(Hermitian(Ω), z, α; direction = :super, rng = rng)
+    rsw_sub   = crit_value_rsw(Hermitian(Ω), z, α; direction = :sub,   rng = rng)
+    c_rsw_super = rsw_super.c; c_rsw_sub = rsw_sub.c
     (; nrow=size(D,1), n_used=length(keep), T_super, T_sub, c,
        reject_super = T_super > c, reject_sub = T_sub > c,
        n_comp, n_sub, n_comp_sig=count(>(1.96), z), n_sub_sig=count(<(-1.96), z),
        worst_sub, strongest_comp,
        c_rsw_super, c_rsw_sub,
-       reject_super_rsw = T_super > c_rsw_super, reject_sub_rsw = T_sub > c_rsw_sub)
+       reject_super_rsw = T_super > c_rsw_super, reject_sub_rsw = T_sub > c_rsw_sub,
+       nslack_super = rsw_super.n_slack, nslack_sub = rsw_sub.n_slack)
 end
 
 # Run every (set, group, cutpoint) once, cache results.
@@ -248,13 +250,14 @@ records = DataFrame(group=String[], cutpoint=String[], set=String[], n_cond=Int[
                     T_super=Float64[], reject_super=Bool[], T_sub=Float64[], reject_sub=Bool[],
                     c_alpha=Float64[], c_rsw_super=Float64[], reject_super_rsw=Bool[],
                     c_rsw_sub=Float64[], reject_sub_rsw=Bool[],
+                    nslack_rsw_super=Int[], nslack_rsw_sub=Int[],
                     n_complement=Int[], n_complement_sig=Int[],
                     n_substitute=Int[], n_substitute_sig=Int[], worst_substitute=Float64[], strongest_complement=Float64[])
 for (g, _) in enumerate(TRANSITION_GROUPS), (lab, _) in specs, set in ("full", "adjacent")
     r = res[(g, lab, set)]
     push!(records, (GROUP_LABELS[g], lab, set, r.nrow, r.n_used, r.T_super, r.reject_super,
                     r.T_sub, r.reject_sub, r.c, r.c_rsw_super, r.reject_super_rsw,
-                    r.c_rsw_sub, r.reject_sub_rsw, r.n_comp, r.n_comp_sig, r.n_sub, r.n_sub_sig,
+                    r.c_rsw_sub, r.reject_sub_rsw, r.nslack_super, r.nslack_sub, r.n_comp, r.n_comp_sig, r.n_sub, r.n_sub_sig,
                     r.worst_sub, r.strongest_comp))
 end
 println("\n=== LF vs RSW (adjacent set): T_super, c_LF, c_RSW, reject_LF→reject_RSW ===")

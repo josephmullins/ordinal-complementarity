@@ -88,6 +88,7 @@ function shape_tests(r_θ::Int, r_x::Int, Π_vec::AbstractVector, Vfree::Abstrac
         reject_convexOC= rs.reject_super,
         c_convex_rsw       = rs.c_rsw_super,
         reject_convexOC_rsw= rs.reject_super_rsw,
+        nslack_convex_rsw  = rs.nslack_rsw_super,   # # moments RSW classifies as slack
         n_neg_suffix     = rs.n_sub,        # # suffix cells with negative point est
         n_neg_suffix_sig = rs.n_sub_sig,    # # significant negative (substitute) suffix cells
         worst_suffix     = rs.worst_sub,    # most negative suffix sum
@@ -102,6 +103,7 @@ function shape_tests(r_θ::Int, r_x::Int, Π_vec::AbstractVector, Vfree::Abstrac
         reject_concaveOS = rp.reject_sub,
         c_concave_rsw       = rp.c_rsw_sub,
         reject_concaveOS_rsw= rp.reject_sub_rsw,
+        nslack_concave_rsw  = rp.nslack_rsw_sub,
         n_pos_prefix     = rp.n_comp,       # # prefix cells with positive point est
         n_pos_prefix_sig = rp.n_comp_sig,   # # significant positive (complement) prefix cells
         strongest_prefix = rp.strongest_comp,  # most positive prefix sum
@@ -132,12 +134,12 @@ function build_table(kind::Symbol)
     end
     df = DataFrame(group=String[], n_suffix_cond=Int[],
                    T_convexOC=Float64[], c_convex=Float64[], reject_convexOC=Bool[],
-                   c_convex_rsw=Float64[], reject_convexOC_rsw=Bool[],
+                   c_convex_rsw=Float64[], reject_convexOC_rsw=Bool[], nslack_convex_rsw=Int[],
                    T_convexOC_sup=Float64[], c_convex_sup=Float64[], reject_convexOC_sup=Bool[],
                    n_neg_suffix=Int[], n_neg_suffix_sig=Int[], worst_suffix=Float64[],
                    n_prefix_cond=Int[],
                    T_concaveOS=Float64[], c_concave=Float64[], reject_concaveOS=Bool[],
-                   c_concave_rsw=Float64[], reject_concaveOS_rsw=Bool[],
+                   c_concave_rsw=Float64[], reject_concaveOS_rsw=Bool[], nslack_concave_rsw=Int[],
                    T_concaveOS_sup=Float64[], c_concave_sup=Float64[], reject_concaveOS_sup=Bool[],
                    n_pos_prefix=Int[], n_pos_prefix_sig=Int[], strongest_prefix=Float64[])
     results = []
@@ -147,11 +149,11 @@ function build_table(kind::Symbol)
         r = shape_tests(r_θ, r_x, Π_vec, Vfree; rng = rng)
         push!(results, r)
         push!(df, (GROUP_LABELS[g], r.n_suf, r.T_convexOC, r.c_convex, r.reject_convexOC,
-                   r.c_convex_rsw, r.reject_convexOC_rsw,
+                   r.c_convex_rsw, r.reject_convexOC_rsw, r.nslack_convex_rsw,
                    r.T_convexOC_sup, r.c_convex_sup, r.reject_convexOC_sup,
                    r.n_neg_suffix, r.n_neg_suffix_sig, r.worst_suffix,
                    r.n_pre, r.T_concaveOS, r.c_concave, r.reject_concaveOS,
-                   r.c_concave_rsw, r.reject_concaveOS_rsw,
+                   r.c_concave_rsw, r.reject_concaveOS_rsw, r.nslack_concave_rsw,
                    r.T_concaveOS_sup, r.c_concave_sup, r.reject_concaveOS_sup,
                    r.n_pos_prefix, r.n_pos_prefix_sig, r.strongest_prefix))
     end

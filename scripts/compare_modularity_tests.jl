@@ -49,7 +49,7 @@ fs = fs[fs.γ .== γ0, :]
 # covariance, z = m/se, Ω = correlation, crit_value_rsw with β = α/10.
 r_θ = bd["r_θ"]; n_y = bd["n_y"]; okb = findall(bd["ok"])
 rng = MersenneTwister(20240601)
-rsw_ind = Dict{Tuple{Int,String},Tuple{Float64,Bool}}()
+rsw_ind = Dict{Tuple{Int,String},Tuple{Float64,Bool,Int}}()
 let D = -get_S_adjacent(r_θ, n_y)
     for g in 1:2
         Π_vec = bd["pibar_ind0"][g]
@@ -64,10 +64,10 @@ let D = -get_S_adjacent(r_θ, n_y)
         z = Dinv * mk
         T_super = sum(min.(0.0, z) .^ 2)
         T_sub   = sum(max.(0.0, z) .^ 2)
-        c_su = crit_value_rsw(Hermitian(Ω), z, ALPHA; direction = :super, rng = rng)
-        c_sb = crit_value_rsw(Hermitian(Ω), z, ALPHA; direction = :sub,   rng = rng)
-        rsw_ind[(g, "super")] = (c_su, T_super > c_su)
-        rsw_ind[(g, "sub")]   = (c_sb, T_sub   > c_sb)
+        su = crit_value_rsw(Hermitian(Ω), z, ALPHA; direction = :super, rng = rng)
+        sb = crit_value_rsw(Hermitian(Ω), z, ALPHA; direction = :sub,   rng = rng)
+        rsw_ind[(g, "super")] = (su.c, T_super > su.c, su.n_slack)
+        rsw_ind[(g, "sub")]   = (sb.c, T_sub   > sb.c, sb.n_slack)
     end
 end
 
@@ -76,7 +76,7 @@ glabel = ["early (0–5)", "school (6–13)"]
 
 rows = DataFrame(object=String[], group=String[], H0=String[],
                  mmm_T=Float64[], mmm_cLF=Float64[], mmm_rejLF=Bool[],
-                 rsw_c=Float64[], rsw_rej=Bool[],
+                 rsw_c=Float64[], rsw_rej=Bool[], rsw_nslack=Int[],
                  fs_T=Float64[], fs_c=Float64[], fs_p=Float64[], fs_rej=Bool[])
 
 function fs_row(obj, g, restriction)
@@ -94,10 +94,11 @@ for (obj, src, fsobj) in [("technology", mmm, "technology"),
         for dir in ("super", "sub")
             T   = r[Symbol("T_$dir")]
             rej = r[Symbol("reject_$dir")]
-            rsw_c, rsw_rej = has_rsw ? (r[Symbol("c_rsw_$dir")], r[Symbol("reject_$(dir)_rsw")]) :
-                                       rsw_ind[(g, dir)]
+            rsw_c, rsw_rej, rsw_ns = has_rsw ?
+                (r[Symbol("c_rsw_$dir")], r[Symbol("reject_$(dir)_rsw")], r[Symbol("nslack_rsw_$dir")]) :
+                rsw_ind[(g, dir)]
             fe = fs_row(fsobj, g, dir == "super" ? "supermodular" : "submodular")
-            push!(rows, (obj, glabel[g], dir, T, r.c_alpha, rej, rsw_c, rsw_rej,
+            push!(rows, (obj, glabel[g], dir, T, r.c_alpha, rej, rsw_c, rsw_rej, rsw_ns,
                          fe.T_n, fe.c_α, fe.p_value, fe.reject))
         end
     end
@@ -112,13 +113,13 @@ for (obj, src, fsobj) in [("technology", shp_tr, "technology"),
                           ("induced_income", shp_in, "induced_income")]
     for r in eachrow(src)
         g = group_name[r.group]
-        for (h0, Tc, cc, rc, crsw, rrsw, fsname) in [
+        for (h0, Tc, cc, rc, crsw, rrsw, nsl, fsname) in [
                 ("convex_OC",  r.T_convexOC,  r.c_convex,  r.reject_convexOC,
-                 r.c_convex_rsw,  r.reject_convexOC_rsw,  "convex_OC"),
+                 r.c_convex_rsw,  r.reject_convexOC_rsw,  r.nslack_convex_rsw,  "convex_OC"),
                 ("concave_OS", r.T_concaveOS, r.c_concave, r.reject_concaveOS,
-                 r.c_concave_rsw, r.reject_concaveOS_rsw, "concave_OS")]
+                 r.c_concave_rsw, r.reject_concaveOS_rsw, r.nslack_concave_rsw, "concave_OS")]
             fe = fs_row(fsobj, g, fsname)
-            push!(rows, (obj, glabel[g], h0, Tc, cc, rc, crsw, rrsw,
+            push!(rows, (obj, glabel[g], h0, Tc, cc, rc, crsw, rrsw, nsl,
                          fe.T_n, fe.c_α, fe.p_value, fe.reject))
         end
     end
@@ -152,7 +153,10 @@ Section~\\ref{subsec:test-oc} on the 36 adjacent survival cross-differences
 (child-bootstrap covariance, \$B=200\$), with critical values \$c^{\\mathrm{LF}}_{0.05}\$
 simulated from the least-favorable null and \$c^{\\mathrm{RSW}}_{0.05}\$ from the
 moment-selection refinement of \\citet{Romano_Shaikh_Wolf-2014-ECTA} with first-stage size
-\$\\beta=\\alpha/10\$. \$\\hat T_{\\mathrm{FS}}\$ is the projection statistic of
+\$\\beta=\\alpha/10\$; the bracketed number is how many of the inequalities the first step
+classifies as slack. Because the second step uses the \$(1-\\alpha+\\beta)\$-quantile,
+\$c^{\\mathrm{RSW}}_{0.05}\$ can exceed \$c^{\\mathrm{LF}}_{0.05}\$ when few inequalities are
+slack. \$\\hat T_{\\mathrm{FS}}\$ is the projection statistic of
 \\citet{Fang_Seo-2021-ECTA} described in Section~\\ref{subsec:test-fs}, with critical value
 \$\\hat c_{0.05}\$ and bootstrap \$p\$-value computed from the same \$B=200\$ child-bootstrap
 draws and tuning \$\\gamma_n=0.01/\\log N\$, \$c_n=1\$ (verdicts are unchanged for
@@ -175,7 +179,7 @@ function write_tex(path, obj, h0s, caption, label)
                 @assert nrow(r) == 1; r = r[1, :]
                 gcol = first ? grptex[grp] : ""
                 first = false
-                println(io, "$(gcol) & $(h0tex[h0]) & $(fmt(r.mmm_T)) & $(fmt(r.mmm_cLF)) & $(rejtex(r.mmm_rejLF)) & $(fmt(r.rsw_c)) & $(rejtex(r.rsw_rej)) & $(fmt(r.fs_T)) & $(fmt(r.fs_c)) ($(@sprintf("%.2f", r.fs_p))) & $(rejtex(r.fs_rej)) \\\\")
+                println(io, "$(gcol) & $(h0tex[h0]) & $(fmt(r.mmm_T)) & $(fmt(r.mmm_cLF)) & $(rejtex(r.mmm_rejLF)) & $(fmt(r.rsw_c))\\,[$(r.rsw_nslack)] & $(rejtex(r.rsw_rej)) & $(fmt(r.fs_T)) & $(fmt(r.fs_c)) ($(@sprintf("%.2f", r.fs_p))) & $(rejtex(r.fs_rej)) \\\\")
             end
             grp == "early (0–5)" && println(io, "\\midrule")
         end
