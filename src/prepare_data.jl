@@ -18,6 +18,7 @@ const DATA_PATHS = (
     HomePartD    = joinpath(NLSY_DIR, "HOME (A, B, C, D)", "HomePartD", "HomePartD_Clean.csv"),
     ParentSkills    = joinpath(NLSY_DIR, "ParentSkills", "ParentSkills_Clean.csv"),
     HouseholdIncome = joinpath(NLSY_DIR, "HouseholdIncome", "HouseholdIncome_Clean.csv"),
+    AdultOutcomes   = joinpath(PROJECT_ROOT, "output", "AdultOutcomes_Clean.csv"),
 )
 
 # ASVAB sections used as parental skill measures (cognitive ability)
@@ -156,6 +157,8 @@ function load_all_datasets(; n_bins_continuous::Int=10)
     df_home   = load_clean(DATA_PATHS.HomePanel)
     df_parent = load_parent_skills(DATA_PATHS.ParentSkills)
     df_income = load_household_income(DATA_PATHS.HouseholdIncome)
+    df_adult  = CSV.read(DATA_PATHS.AdultOutcomes, DataFrame; missingstring=["NA", ""])
+    hasproperty(df_adult, :Column1) && select!(df_adult, Not(:Column1))
 
     println("  MSD:             $(nrow(df_msd)) rows")
     println("  PPVT:            $(nrow(df_ppvt)) rows")
@@ -164,6 +167,7 @@ function load_all_datasets(; n_bins_continuous::Int=10)
     println("  HOME:            $(nrow(df_home)) rows")
     println("  ParentSkills:    $(nrow(df_parent)) rows ($(length(unique(df_parent.MID))) mothers)")
     println("  HouseholdIncome: $(nrow(df_income)) rows ($(length(unique(df_income.MID))) mothers, $(length(unique(df_income.YEAR))) years)")
+    println("  AdultOutcomes:   $(nrow(df_adult)) rows")
 
     # ── Pooled cutoffs for all continuous measures ──
     println("Computing pooled cutoffs ($n_bins_continuous bins)...")
@@ -186,7 +190,7 @@ function load_all_datasets(; n_bins_continuous::Int=10)
         println("  $k: $(length(v)+1) bins, cutoffs = $(round.(v; digits=1))")
     end
 
-    return (; df_msd, df_ppvt, df_piat, df_digit, df_home, df_parent, df_income, cutoffs)
+    return (; df_msd, df_ppvt, df_piat, df_digit, df_home, df_parent, df_income, df_adult, cutoffs)
 end
 
 # ─────────────────────────────────────────────────────────────────
@@ -992,14 +996,27 @@ function _encode_income(kids, N, T, kid_to_mid,
                          home_filtered, home_idx,
                          msd_filtered,  msd_idx,
                          df_income)
-    # Build (MID, YEAR) → log income lookup
+    # Load CPI-U for deflation (base year = 2010)
+    cpi_path = joinpath(PROJECT_ROOT, "output", "cpi_u_annual.csv")
+    cpi_table = Dict{Int, Float64}()
+    if isfile(cpi_path)
+        df_cpi = CSV.read(cpi_path, DataFrame)
+        for row in eachrow(df_cpi)
+            cpi_table[row.year] = row.cpi
+        end
+    end
+    cpi_base = get(cpi_table, 2010, 218.056)
+
+    # Build (MID, YEAR) → log real income lookup
     income_lookup = Dict{Tuple{Int,Int}, Float64}()
     for i in 1:nrow(df_income)
         mid  = df_income[i, :MID]
         year = df_income[i, :YEAR]
         inc  = df_income[i, :NetIncome]
         if !ismissing(mid) && !ismissing(year) && !ismissing(inc) && inc > 0
-            income_lookup[(Int(mid), Int(year))] = log(Float64(inc))
+            yr = Int(year)
+            deflator = get(cpi_table, yr, cpi_base) / cpi_base
+            income_lookup[(Int(mid), yr)] = log(Float64(inc) / deflator)
         end
     end
 
@@ -1058,6 +1075,7 @@ function prepare_panel_data(datasets;
     exclude_sources::Vector{Vector{Symbol}} = [Symbol[] for _ in age_ranges],
 )
     (; df_msd, df_ppvt, df_piat, df_digit, df_home, df_parent, df_income, cutoffs) = datasets
+    df_adult = haskey(datasets, :df_adult) ? datasets.df_adult : nothing
     T = length(age_ranges)
 
     @assert length(invest_items) == T "invest_items must have $T entries (one per period)"
@@ -1238,12 +1256,51 @@ function prepare_panel_data(datasets;
         end
     end
 
+    # ── Adult outcomes: cross-sectional measures of (θ_T, ω) ──
+    # X_adult[m][n] = observed value for child n, measure m. 0 = missing.
+    # Measures: 1=HS (binary 1/2), 2=College (binary 1/2),
+    #           3=EarnQuintile (1-5), 4=AlwaysEmployed (binary 1/2)
+    # Binary outcomes: 1=no, 2=yes (matches κ=2 emission convention where col 1 = low type)
+    adult_cols   = [:HS, :College, :EarnQuintile, :AlwaysEmployed]
+    adult_names  = ["HS", "College", "EarnQ", "AlwaysEmp"]
+    adult_κ      = [2, 2, 5, 2]
+    n_adult      = length(adult_cols)
+    X_adult      = [zeros(Int, N) for _ in 1:n_adult]
+
+    if df_adult !== nothing
+        adult_kid_idx = Dict{Int,Int}(df_adult[i, :KID] => i for i in 1:nrow(df_adult))
+        for (ni, kid) in enumerate(kids_final)
+            !haskey(adult_kid_idx, kid) && continue
+            row = adult_kid_idx[kid]
+            for m in 1:n_adult
+                val = df_adult[row, adult_cols[m]]
+                if ismissing(val)
+                    X_adult[m][ni] = 0   # missing
+                elseif m == 3   # EarnQuintile: already 1-5
+                    v = Int(val)
+                    X_adult[m][ni] = (1 <= v <= 5) ? v : 0
+                else            # binary: 0/1 → 1/2
+                    X_adult[m][ni] = Int(val) + 1
+                end
+            end
+        end
+
+        println("\n  Adult outcomes (cross-sectional):")
+        for m in 1:n_adult
+            n_nm = sum(X_adult[m] .> 0)
+            println("    $(adult_names[m]): κ=$(adult_κ[m]), non-missing=$n_nm/$N")
+        end
+    else
+        println("\n  Adult outcomes: not available (df_adult is nothing)")
+    end
+
     return (;
         N, T, r_θ, r_I,
         X_θ = X_θ_all, κ_θ = κ_θ_all, measure_names_θ = names_θ_all,
         X_I = X_I_all, κ_I = κ_I_all, measure_names_I = names_I_all,
         X_P, κ_P, measure_names_P = names_P,
         Y_income,
+        X_adult, κ_adult = adult_κ, measure_names_adult = adult_names,
         kids = kids_final,
     )
 end

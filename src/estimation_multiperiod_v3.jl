@@ -62,7 +62,33 @@ function precompute_Pi_z(trans_specs::Vector{RobitNNTransitionV3},
             Π = _build_robit_nn_v3_pi(vec_g, r_θ, r_I, K, ν,
                                         P_grid[kP], ω_grid[kω]; θ_grid, I_grid)
             for t in group
-                Pi_z[z][t] = Π   # same Π for all t in group
+                Pi_z[z][t] = Π
+            end
+        end
+    end
+    return Pi_z
+end
+
+function precompute_Pi_z(trans_specs::Vector{OrderedProbitTransitionV3},
+                           transition_groups::Vector{Vector{Int}},
+                           r_θ::Int, r_I::Int, r_P::Int, r_ω::Int;
+                           θ_grid::AbstractVector=1.0:r_θ,
+                           I_grid::AbstractVector=1.0:r_I,
+                           P_grid::AbstractVector=1.0:r_P,
+                           ω_grid::AbstractVector=1.0:r_ω)
+    r_Z = r_P * r_ω
+    T_minus_1 = sum(length, transition_groups)
+    Pi_z = [Vector{Array{Float64,3}}(undef, T_minus_1) for _ in 1:r_Z]
+
+    for (g, group) in enumerate(transition_groups)
+        spec = trans_specs[g]
+        vec_g = pack_op_trans_v3(spec)
+        for kω in 1:r_ω, kP in 1:r_P
+            z = regime_z(kP, kω, r_ω)
+            Π = _build_op_trans_v3_pi(vec_g, r_θ, r_I, P_grid[kP], ω_grid[kω];
+                                        θ_grid, I_grid)
+            for t in group
+                Pi_z[z][t] = Π
             end
         end
     end
@@ -242,30 +268,71 @@ end
 # ─────────────────────────────────────────────────────────────────
 
 """
-    expectation_step_v3!(γ_agg, xi_sum_z, w_z, gamma_z_t1, ccp_xi_z, pi0_ss,
-                          Pi_z_pre, params_v3, params_skill, data; grids...)
+    precompute_CCP_z(ccp_spec, r_Z, r_P, r_ω, bin_values, r_θ, r_I;
+                      θ_grid, I_grid, P_grid, ω_grid)
+        -> (CCP_init_pre, CCP_trans_pre)
+
+Precompute CCP arrays for all (regime, income bin) combinations.
+
+Returns:
+  CCP_init_pre  — [z][b] :: Matrix{Float64} (r_I, r_θ)
+  CCP_trans_pre — [z][b] :: Array{Float64,3} (r_I, r_I, r_θ)
+"""
+function precompute_CCP_z(ccp_spec::OrderedProbitCCPV3,
+                            r_Z::Int, r_P::Int, r_ω::Int,
+                            bin_values::Vector{Float64},
+                            r_θ::Int, r_I::Int;
+                            θ_grid::AbstractVector, I_grid::AbstractVector,
+                            P_grid::AbstractVector, ω_grid::AbstractVector)
+    n_bins = length(bin_values)
+    CCP_init_pre  = [[Matrix{Float64}(undef, 0, 0) for _ in 1:n_bins] for _ in 1:r_Z]
+    CCP_trans_pre = [[Array{Float64,3}(undef, 0, 0, 0) for _ in 1:n_bins] for _ in 1:r_Z]
+
+    for kω in 1:r_ω, kP in 1:r_P
+        z = regime_z(kP, kω, r_ω)
+        kP_val = P_grid[kP]; kω_val = ω_grid[kω]
+        for b in 1:n_bins
+            y_b = bin_values[b]
+            # For missing bin (y_b=0.0), build_ccp treats NaN specially
+            # but bin_values already maps missing → 0.0 so β₅·0 = 0. Correct.
+            CCP_init_pre[z][b] = build_ccp_v3_init(ccp_spec, kP_val, kω_val,
+                                                      y_b; θ_grid, r_I)
+            CCP_trans_pre[z][b] = build_ccp_v3_trans(ccp_spec, kP_val, kω_val,
+                                                       y_b; θ_grid, I_grid, r_I)
+        end
+    end
+    return CCP_init_pre, CCP_trans_pre
+end
+
+"""
+    expectation_step_v3!(γ_agg, xi_sum_z, w_z, gamma_z_t1, ccp_init_ss, ccp_trans_ss,
+                          pi0_ss, Pi_z_pre, CCP_init_pre, CCP_trans_pre,
+                          bin_map, params_v3, params_skill, data; grids...)
         -> total_log_likelihood
 
-Full V3 E-step.  For each child, run r_Z forward-backward passes (with
-precomputed emissions — one compute per child, not per regime), then
-aggregate with regime posteriors.
+Full V3 E-step with precomputed CCP arrays (no per-child allocation).
 
 Mutated outputs:
-  γ_agg      — (T, r_θ, r_I, N)              aggregated posteriors
-  xi_sum_z   — [z][t] (r_θ,r_I,r_θ,r_I)      regime-specific pairwise SS
-  w_z        — (r_Z, N)                       regime posteriors
-  gamma_z_t1 — (r_θ, r_I, r_Z, N)             period-1 regime posteriors (for CCP/π0 M-step)
-  ccp_xi_z   — (r_I, r_I, r_θ, r_Z, T-1, N)   per-child CCP SS (for CCP M-step)
-  pi0_ss     — (r_θ, r_P, r_ω)                π0 accumulator
+  γ_agg         — (T, r_θ, r_I, N)                    aggregated posteriors
+  xi_sum_z      — [z][t] (r_θ,r_I,r_θ,r_I)            regime-specific pairwise SS
+  w_z           — (r_Z, N)                             regime posteriors
+  gamma_z_t1    — (r_θ, r_I, r_Z, N)                   period-1 regime posteriors
+  ccp_init_ss   — (r_θ, r_I, r_Z, n_bins)             binned initial CCP SS
+  ccp_trans_ss  — (r_I, r_I, r_θ, r_Z, T-1, n_bins)   binned transition CCP SS
+  pi0_ss        — (r_θ, r_P, r_ω)                      π0 accumulator
 """
 function expectation_step_v3!(
     γ_agg::Array{Float64,4},
     xi_sum_z::Vector{Vector{Array{Float64,4}}},   # [z][t]
     w_z::Matrix{Float64},
     gamma_z_t1::Array{Float64,4},
-    ccp_xi_z::Array{Float64,6},
+    ccp_init_ss::Array{Float64,4},
+    ccp_trans_ss::Array{Float64,6},
     pi0_ss::Array{Float64,3},
     Pi_z_pre::Vector{Vector{Array{Float64,3}}},   # [z][t] precomputed
+    CCP_init_pre::Vector{Vector{Matrix{Float64}}},   # [z][b]
+    CCP_trans_pre::Vector{Vector{Array{Float64,3}}},  # [z][b]
+    bin_map::Matrix{Int},
     params_v3,          # (; r_P, r_ω, π0, π_Z, ccp_spec, Q_P, income_model, trans_specs)
     params_skill,       # (; r_θ, r_I, T, P_θ, P_I)
     data;
@@ -274,7 +341,9 @@ function expectation_step_v3!(
     P_grid::AbstractVector = 1.0:params_v3.r_P,
     ω_grid::AbstractVector = 1.0:params_v3.r_ω,
 )
-    (; r_P, r_ω, π0, π_Z, ccp_spec, Q_P, income_model) = params_v3
+    (; r_P, r_ω, π0, π_Z, Q_P, income_model) = params_v3
+    adult_matrices = haskey(params_v3, :adult_matrices) ? params_v3.adult_matrices : Array{Float64,3}[]
+    has_adult = !isempty(adult_matrices) && haskey(data, :X_adult) && !isempty(data.X_adult)
     (; r_θ, r_I, T) = params_skill
     N = data.N
     r_Z = r_P * r_ω
@@ -282,7 +351,8 @@ function expectation_step_v3!(
     # Reset accumulators
     fill!(γ_agg, 0.0)
     for z in 1:r_Z, t in 1:T-1; fill!(xi_sum_z[z][t], 0.0); end
-    fill!(w_z, 0.0); fill!(gamma_z_t1, 0.0); fill!(ccp_xi_z, 0.0); fill!(pi0_ss, 0.0)
+    fill!(w_z, 0.0); fill!(gamma_z_t1, 0.0)
+    fill!(ccp_init_ss, 0.0); fill!(ccp_trans_ss, 0.0); fill!(pi0_ss, 0.0)
 
     # FB scratch (reused across children and regimes)
     α     = zeros(T, r_θ, r_I)
@@ -293,6 +363,9 @@ function expectation_step_v3!(
     # Per-regime scratch for one child (stored for all z before weighting)
     γ_z_all = [zeros(T, r_θ, r_I)                                   for _ in 1:r_Z]
     ξ_z_all = [[zeros(r_θ, r_I, r_θ, r_I) for _ in 1:T-1]          for _ in 1:r_Z]
+
+    # Reusable CCP vector (just pointers into precomputed arrays)
+    CCP_nz = Vector{Array{Float64,3}}(undef, T-1)
 
     log_π_Z   = [log(max(π_Z[kP, kω], 1e-300)) for kP in 1:r_P, kω in 1:r_ω]
     log_ll_z  = zeros(r_Z)
@@ -310,7 +383,6 @@ function expectation_step_v3!(
         # ── Pass 1: forward-backward for each regime ──
         for kω in 1:r_ω, kP in 1:r_P
             z = regime_z(kP, kω, r_ω)
-            kP_val = P_grid[kP]; kω_val = ω_grid[kω]
 
             # Regime emission log-likelihood
             ll_regime = regime_loglik(n, kP, kω, Q_P, income_model, data;
@@ -322,19 +394,15 @@ function expectation_step_v3!(
             s = sum(π0_z_buf)
             if s > 0; π0_z_buf ./= s; else; fill!(π0_z_buf, 1.0/r_θ); end
 
-            # Build initial joint: π0_nz[kθ,kI] = P(θ_1|z) * CCP_init(I_1|θ_1,I_0=0,z,y_1)
-            ccp_init = build_ccp_v3_init(ccp_spec, kP_val, kω_val,
-                                           data.Y_income[n, 1]; θ_grid, r_I)
+            # Build initial joint from precomputed CCP
+            ccp_init = CCP_init_pre[z][bin_map[n, 1]]
             for kI in 1:r_I, kθ in 1:r_θ
                 @inbounds π0_nz_buf[kθ, kI] = π0_z_buf[kθ] * ccp_init[kI, kθ]
             end
 
-            # Build per-transition CCPs
-            CCP_nz = Vector{Array{Float64,3}}(undef, T-1)
+            # Look up precomputed CCPs for transitions
             for t in 1:T-1
-                CCP_nz[t] = build_ccp_v3_trans(ccp_spec, kP_val, kω_val,
-                                                 data.Y_income[n, t+1];
-                                                 θ_grid, I_grid, r_I)
+                CCP_nz[t] = CCP_trans_pre[z][bin_map[n, t+1]]
             end
 
             # Reset ξ scratch for this regime
@@ -346,6 +414,25 @@ function expectation_step_v3!(
                 π0_nz_buf, Pi_z_pre[z], CCP_nz, L_scratch, r_θ, r_I, T)
 
             log_ll_z[z] += ll_skills
+
+            # Adult outcome log-likelihood (uses smoothed γ at final period T)
+            if has_adult
+                γ_z = γ_z_all[z]
+                for m in eachindex(data.X_adult)
+                    x = data.X_adult[m][n]
+                    x == 0 && continue   # missing
+                    Am = adult_matrices[m]
+                    for kθ in 1:r_θ
+                        # Marginalize over I at the final period
+                        θT_w = 0.0
+                        for kI in 1:r_I
+                            @inbounds θT_w += γ_z[T, kθ, kI]
+                        end
+                        θT_w < 1e-15 && continue
+                        @inbounds log_ll_z[z] += θT_w * log(max(Am[x, kθ, kω], 1e-300))
+                    end
+                end
+            end
         end
 
         # ── Regime posteriors ──
@@ -377,18 +464,21 @@ function expectation_step_v3!(
                 end
             end
 
-            # Period-1 posteriors (for CCP M-step initial and π0)
+            # Period-1 posteriors for CCP and π0
+            b1 = bin_map[n, 1]
             for kI in 1:r_I, kθ in 1:r_θ
                 @inbounds gamma_z_t1[kθ, kI, z, n] = γ_z[1, kθ, kI]
+                @inbounds ccp_init_ss[kθ, kI, z, b1] += wz * γ_z[1, kθ, kI]
             end
 
-            # Per-child CCP sufficient stats: _ccpsum_from_xi per (z, t)
+            # Binned CCP transition SS (aggregate ξ into bins)
             for t in 1:T-1
+                b = bin_map[n, t+1]
                 ξ_t = ξ_z[t]
                 for kθ1 in 1:r_θ, kI in 1:r_I, kI1 in 1:r_I
                     s = 0.0
                     for kθ in 1:r_θ; @inbounds s += ξ_t[kθ1, kI1, kθ, kI]; end
-                    @inbounds ccp_xi_z[kI1, kI, kθ1, z, t, n] = s
+                    @inbounds ccp_trans_ss[kI1, kI, kθ1, z, t, b] += wz * s
                 end
             end
 
@@ -414,37 +504,149 @@ function mstep_pi0(pi0_ss::Array{Float64,3})
     return π0, π_Z
 end
 
-"""Update Q_P[m] nonparametrically from regime posteriors."""
-function mstep_Q_P(w_z::Matrix{Float64}, data, r_P::Int, r_ω::Int)
+"""
+    mstep_Q_P(probit_P, w_z, data, r_P, r_ω; options) -> (probit_P_new, Q_P_new)
+
+Ordered probit M-step for ASVAB emissions.  Marginalizes w_z over ω to get
+per-child weights W_P[kP, n], then optimizes each measure's ordered probit.
+"""
+function mstep_Q_P(probit_P::OrderedProbitEmission,
+                    w_z::Matrix{Float64}, data, r_P::Int, r_ω::Int;
+                    options=DEFAULT_OPTIM_OPTIONS)
     N = size(w_z, 2)
-    Q_P_new = Vector{Matrix{Float64}}(undef, length(data.X_P))
 
-    for m in eachindex(data.X_P)
-        κ_m = data.κ_P[m]
-        Q = zeros(κ_m, r_P)
-        denom = zeros(r_P)
-
-        for n in 1:N
-            x = data.X_P[m][n]
-            x == 0 && continue
-            for kω in 1:r_ω, kP in 1:r_P
-                z = regime_z(kP, kω, r_ω)
-                @inbounds wz = w_z[z, n]
-                @inbounds Q[x, kP] += wz
-                @inbounds denom[kP] += wz
-            end
-        end
-
-        for kP in 1:r_P
-            if denom[kP] > 0
-                Q[:, kP] ./= denom[kP]
-            else
-                Q[:, kP] .= 1.0 / κ_m
-            end
-        end
-        Q_P_new[m] = Q
+    # Marginalize regime posteriors over ω to get P(θ^P = kP | data_n)
+    W_P = zeros(r_P, N)
+    for n in 1:N, kω in 1:r_ω, kP in 1:r_P
+        z = regime_z(kP, kω, r_ω)
+        @inbounds W_P[kP, n] += w_z[z, n]
     end
-    return Q_P_new
+
+    M = length(data.X_P)
+    new_tau = Vector{Vector{Float64}}(undef, M)
+    new_alpha = Vector{Float64}(undef, M)
+    Q_P_new = Vector{Matrix{Float64}}(undef, M)
+
+    for m in 1:M
+        κ_m = data.κ_P[m]
+        n_cut = κ_m - 1
+        x0 = vcat(_pack_cutpoints(probit_P.tau[m]), probit_P.alpha[m])
+        obj = x -> _single_measure_negll(x, W_P, data.X_P[m], κ_m, r_P)
+        xopt = try
+            result = optimize(obj, x0, BFGS(), options; autodiff=:forward)
+            Optim.minimizer(result)
+        catch
+            result = optimize(obj, x0, NelderMead(), options)
+            Optim.minimizer(result)
+        end
+        new_tau[m] = _unpack_cutpoints(xopt[1:n_cut])
+        new_alpha[m] = xopt[n_cut + 1]
+        Q_P_new[m] = ordered_probit_matrix(new_tau[m], new_alpha[m], r_P)
+    end
+
+    return OrderedProbitEmission(new_tau, new_alpha), Q_P_new
+end
+
+"""
+    mstep_adult_outcomes(adult_emission, γ_agg, w_z, data, r_θ, r_I, r_P, r_ω;
+                          θ_grid, ω_grid, options) -> (new_adult_emission, new_adult_matrices)
+
+M-step for adult outcome emissions. Builds sufficient statistics SS[m][k, kθ, kω]
+from smoothed posteriors γ at final period T, weighted by regime posteriors w_z.
+Then optimizes ordered probit parameters via L-BFGS.
+"""
+function mstep_adult_outcomes(adult_emission::AdultOutcomeEmission,
+                               γ_agg::Array{Float64,4},
+                               w_z::Matrix{Float64},
+                               data, r_θ::Int, r_I::Int, r_P::Int, r_ω::Int;
+                               θ_grid::AbstractVector=1.0:r_θ,
+                               ω_grid::AbstractVector=1.0:r_ω,
+                               options=DEFAULT_OPTIM_OPTIONS)
+    N = data.N
+    T = data.T
+    κ_adult = data.κ_adult
+    M_adult = length(κ_adult)
+
+    # Build sufficient statistics: SS[m][k, kθ, kω]
+    # SS[m][k, kθ, kω] = Σ_n 1[x_m=k] * w_ω(kω, n) * (Σ_kI γ_agg[T, kθ, kI, n])
+    # where w_ω(kω, n) = Σ_kP w_z(z(kP,kω), n) marginalizes over θ^P.
+    # Since γ_agg = Σ_z w_z * γ^z and Σ_z w_z = 1, and the adult outcome
+    # emissions depend on (kθ, kω) but not kP, we weight γ_agg by the
+    # marginalized regime posterior w_ω. This is exact when γ^z is independent
+    # of the regime (approximately true for well-identified models).
+    SS_adult = [zeros(κ_adult[m], r_θ, r_ω) for m in 1:M_adult]
+    for n in 1:N
+        for kω in 1:r_ω
+            # Marginalize w_z over kP to get w_ω[kω, n]
+            w_omega = 0.0
+            for kP in 1:r_P
+                z = regime_z(kP, kω, r_ω)
+                @inbounds w_omega += w_z[z, n]
+            end
+            w_omega < 1e-15 && continue
+            for kθ in 1:r_θ
+                # Marginalize γ_agg over I at final period
+                θT_w = 0.0
+                for kI in 1:r_I
+                    @inbounds θT_w += γ_agg[T, kθ, kI, n]
+                end
+                weight = w_omega * θT_w
+                weight < 1e-15 && continue
+                for m in 1:M_adult
+                    x = data.X_adult[m][n]
+                    x == 0 && continue
+                    @inbounds SS_adult[m][x, kθ, kω] += weight
+                end
+            end
+        end
+    end
+
+    # Optimize
+    x0 = pack_adult_emission(adult_emission)
+    obj = x -> adult_emission_negll(x, SS_adult, κ_adult, r_θ, r_ω; θ_grid, ω_grid)
+    xopt = try
+        result = optimize(obj, x0, LBFGS(), options; autodiff=:forward)
+        Optim.minimizer(result)
+    catch
+        result = optimize(obj, x0, NelderMead(), options)
+        Optim.minimizer(result)
+    end
+    new_ae = unpack_adult_emission(xopt, κ_adult)
+    new_matrices = build_adult_matrices(new_ae, κ_adult, r_θ, r_ω; θ_grid, ω_grid)
+    return new_ae, new_matrices
+end
+
+"""Grouped transition M-step for V3 ordered probit."""
+function mstep_transition_v3_grouped(
+    trans_specs::Vector{OrderedProbitTransitionV3},
+    xi_sum_z::Vector{Vector{Array{Float64,4}}},
+    transition_groups::Vector{Vector{Int}},
+    r_θ::Int, r_I::Int, r_P::Int, r_ω::Int;
+    θ_grid::AbstractVector=collect(1.0:r_θ),
+    I_grid::AbstractVector=collect(1.0:r_I),
+    P_grid::AbstractVector=collect(1.0:r_P),
+    ω_grid::AbstractVector=collect(1.0:r_ω),
+    options=DEFAULT_OPTIM_OPTIONS,
+)
+    r_Z = r_P * r_ω
+    new_specs = Vector{OrderedProbitTransitionV3}(undef, length(transition_groups))
+
+    for (g, group) in enumerate(transition_groups)
+        Q_sum_z = Vector{Array{Float64,3}}(undef, r_Z)
+        for z in 1:r_Z
+            Q_sum_z[z] = _qsum_from_xi(xi_sum_z[z][group[1]])
+            for t in group[2:end]
+                Q_sum_z[z] = Q_sum_z[z] .+ _qsum_from_xi(xi_sum_z[z][t])
+            end
+        end
+
+        x0 = pack_op_trans_v3(trans_specs[g])
+        obj = x -> transition_negll_op_v3(x, Q_sum_z, r_θ, r_I,
+                                            r_P, r_ω; θ_grid, I_grid, P_grid, ω_grid)
+        result = optimize(obj, x0, LBFGS(), options; autodiff=:forward)
+        new_specs[g] = unpack_op_trans_v3(Optim.minimizer(result), r_θ)
+    end
+    return new_specs
 end
 
 """Grouped transition M-step for V3 robit NN."""
@@ -458,6 +660,8 @@ function mstep_transition_v3_grouped(
     P_grid::AbstractVector=collect(1.0:r_P),
     ω_grid::AbstractVector=collect(1.0:r_ω),
     options=DEFAULT_OPTIM_OPTIONS,
+    λ_logw::Float64=0.0,   # ridge on log_w (weight decay) to tame the
+                            # robit-NN compensating-pair degeneracy.  0 ⇒ off.
 )
     r_Z = r_P * r_ω
     new_specs = Vector{RobitNNTransitionV3}(undef, length(transition_groups))
@@ -472,35 +676,21 @@ function mstep_transition_v3_grouped(
             end
         end
 
-        # Optimise
+        # Optimise. The last K packed entries are log_w; penalize them
+        # (toward 0 ⇒ w toward 1) to remove the flat compensating-pair ridge.
         K = trans_specs[g].K; ν = trans_specs[g].ν
         x0 = pack_robit_nn_v3(trans_specs[g])
         obj = x -> transition_negll_robit_nn_v3(x, Q_sum_z, r_θ, r_I, K, ν,
-                                                  r_P, r_ω; θ_grid, I_grid, P_grid, ω_grid)
+                                                  r_P, r_ω; θ_grid, I_grid, P_grid, ω_grid) +
+                   λ_logw * sum(abs2, @view x[(end - K + 1):end])
         result = optimize(obj, x0, LBFGS(), options; autodiff=:forward)
         new_specs[g] = unpack_robit_nn_v3(Optim.minimizer(result), r_θ, K; ν)
     end
     return new_specs
 end
 
-"""CCP M-step: optimise OrderedProbitCCPV3 over all (n, z, t)."""
-function mstep_ccp_v3(ccp_spec::OrderedProbitCCPV3,
-                       ccp_xi_z::Array{Float64,6},
-                       gamma_z_t1::Array{Float64,4},
-                       w_z::Matrix{Float64},
-                       Y_income::Matrix{Float64},
-                       r_θ::Int, r_I::Int, r_P::Int, r_ω::Int, T::Int;
-                       θ_grid::AbstractVector=collect(1.0:r_θ),
-                       I_grid::AbstractVector=collect(1.0:r_I),
-                       P_grid::AbstractVector=collect(1.0:r_P),
-                       ω_grid::AbstractVector=collect(1.0:r_ω),
-                       options=DEFAULT_OPTIM_OPTIONS)
-    x0 = pack_ccp_v3(ccp_spec)
-    obj = x -> ccp_negll_v3(x, ccp_xi_z, gamma_z_t1, w_z, Y_income,
-                              r_θ, r_I, r_P, r_ω, T; θ_grid, I_grid, P_grid, ω_grid)
-    result = optimize(obj, x0, LBFGS(), options; autodiff=:forward)
-    return unpack_ccp_v3(Optim.minimizer(result), r_I)
-end
+## Note: CCP M-step is now done inline in the EM loop using
+## ccp_negll_v3_binned with pre-aggregated SS from the E-step.
 
 # ─────────────────────────────────────────────────────────────────
 # Initialisation
@@ -526,7 +716,12 @@ function initialize_params_v3(data, config::NamedTuple=NamedTuple();
     P_I      = [emission_matrices_from_probit(probit_I[t], r_I) for t in 1:T]
 
     # Transition specs: one per group
-    trans_specs = [initialize_robit_nn_v3(r_θ, K; rng, ν) for _ in 1:n_groups]
+    transition_type = get(config, :transition, :robit_nn)
+    trans_specs = if transition_type == :ordered_probit
+        [initialize_op_trans_v3(r_θ; rng) for _ in 1:n_groups]
+    else
+        [initialize_robit_nn_v3(r_θ, K; rng, ν) for _ in 1:n_groups]
+    end
 
     # CCP
     ccp_spec = initialize_ccp_v3(r_I; rng)
@@ -535,24 +730,33 @@ function initialize_params_v3(data, config::NamedTuple=NamedTuple();
     π0 = ones(r_θ, r_P, r_ω) / (r_θ * r_P * r_ω)
     π_Z = ones(r_P, r_ω) / (r_P * r_ω)
 
-    # Parental emissions (near-uniform)
-    Q_P = [begin
-        κ_m = κ_P[m]
-        Q = 0.5 * ones(κ_m, r_P) / κ_m .+ 0.5 * rand(rng, κ_m, r_P)
-        Q ./= sum(Q; dims=1)
-        Q
-    end for m in eachindex(κ_P)]
+    # Parental emissions (ordered probit)
+    probit_P = initialize_ordered_probit(collect(κ_P), r_P; rng)
+    Q_P = emission_matrices_from_probit(probit_P, r_P)
 
     # Income model (from sample moments)
     income_model = initialize_income_model(data.Y_income)
+
+    # Adult outcome emissions (ordered probit on θ_T × ω)
+    κ_adult = haskey(data, :κ_adult) ? data.κ_adult : Int[]
+    if !isempty(κ_adult)
+        adult_emission = initialize_adult_outcome_emission(κ_adult, r_θ, r_ω; rng)
+        adult_matrices = build_adult_matrices(adult_emission, κ_adult, r_θ, r_ω)
+    else
+        adult_emission = AdultOutcomeEmission(Vector{Float64}[], Float64[], Float64[])
+        adult_matrices = Array{Float64,3}[]
+    end
 
     params_v3 = (;
         r_P, r_ω,
         π0, π_Z,
         trans_specs,
         ccp_spec,
+        probit_P,
         Q_P,
         income_model,
+        adult_emission,
+        adult_matrices,
     )
     params_skill = (; r_θ, r_I, T, P_θ, P_I, probit_θ, probit_I)
 
@@ -577,6 +781,8 @@ function expectation_maximization_v3(
     maxiter::Int  = 500,
     verbose::Bool = true,
     mstep_options = DEFAULT_OPTIM_OPTIONS,
+    n_income_bins::Int = 20,
+    fix_betaω::Bool = false,
 )
     (; r_θ, r_I, T) = params_skill_init
     (; r_P, r_ω) = params_v3_init
@@ -588,13 +794,18 @@ function expectation_maximization_v3(
     θ_grid = collect(1.0:r_θ);  I_grid = collect(1.0:r_I)
     P_grid = collect(1.0:r_P);  ω_grid = collect(1.0:r_ω)
 
+    # Bin income ONCE (depends only on data, not parameters)
+    bin_map, bin_values = bin_income(data.Y_income; n_bins=n_income_bins)
+    n_total_bins = length(bin_values)
+
     # Allocate
-    γ_agg      = zeros(T, r_θ, r_I, N)
-    xi_sum_z   = [[zeros(r_θ, r_I, r_θ, r_I) for _ in 1:T_minus_1] for _ in 1:r_Z]
-    w_z        = zeros(r_Z, N)
-    gamma_z_t1 = zeros(r_θ, r_I, r_Z, N)
-    ccp_xi_z   = zeros(r_I, r_I, r_θ, r_Z, T_minus_1, N)
-    pi0_ss     = zeros(r_θ, r_P, r_ω)
+    γ_agg        = zeros(T, r_θ, r_I, N)
+    xi_sum_z     = [[zeros(r_θ, r_I, r_θ, r_I) for _ in 1:T_minus_1] for _ in 1:r_Z]
+    w_z          = zeros(r_Z, N)
+    gamma_z_t1   = zeros(r_θ, r_I, r_Z, N)
+    ccp_init_ss  = zeros(r_θ, r_I, r_Z, n_total_bins)
+    ccp_trans_ss = zeros(r_I, r_I, r_θ, r_Z, T_minus_1, n_total_bins)
+    pi0_ss       = zeros(r_θ, r_P, r_ω)
 
     params_v3    = params_v3_init
     params_skill = params_skill_init
@@ -607,10 +818,16 @@ function expectation_maximization_v3(
         Pi_z_pre = precompute_Pi_z(params_v3.trans_specs, transition_groups,
                                      r_θ, r_I, r_P, r_ω; θ_grid, I_grid, P_grid, ω_grid)
 
+        # ── Precompute CCP arrays per (regime, income bin) ──
+        CCP_init_pre, CCP_trans_pre = precompute_CCP_z(
+            params_v3.ccp_spec, r_Z, r_P, r_ω, bin_values, r_θ, r_I;
+            θ_grid, I_grid, P_grid, ω_grid)
+
         # ── E-step ──
         ll = expectation_step_v3!(
-            γ_agg, xi_sum_z, w_z, gamma_z_t1, ccp_xi_z, pi0_ss,
-            Pi_z_pre, params_v3, params_skill, data;
+            γ_agg, xi_sum_z, w_z, gamma_z_t1, ccp_init_ss, ccp_trans_ss, pi0_ss,
+            Pi_z_pre, CCP_init_pre, CCP_trans_pre, bin_map,
+            params_v3, params_skill, data;
             θ_grid, I_grid, P_grid, ω_grid)
 
         # ── M-step: child skill/investment emissions ──
@@ -624,19 +841,40 @@ function expectation_maximization_v3(
             params_v3.trans_specs, xi_sum_z, transition_groups,
             r_θ, r_I, r_P, r_ω; θ_grid, I_grid, P_grid, ω_grid, options=mstep_options)
 
-        # ── M-step: CCP ──
-        new_ccp_spec = mstep_ccp_v3(
-            params_v3.ccp_spec, ccp_xi_z, gamma_z_t1, w_z, data.Y_income,
-            r_θ, r_I, r_P, r_ω, T; θ_grid, I_grid, P_grid, ω_grid, options=mstep_options)
+        # ── M-step: CCP (using pre-aggregated binned SS) ──
+        x0_ccp = pack_ccp_v3(params_v3.ccp_spec)
+        obj_ccp = x -> ccp_negll_v3_binned(x, ccp_init_ss, ccp_trans_ss, bin_values,
+                                             r_θ, r_I, r_P, r_ω, T;
+                                             θ_grid, I_grid, P_grid, ω_grid)
+        res_ccp = optimize(obj_ccp, x0_ccp, LBFGS(), mstep_options; autodiff=:forward)
+        new_ccp_spec = unpack_ccp_v3(Optim.minimizer(res_ccp), r_I)
 
         # ── M-step: π0, π_Z ──
         new_π0, new_π_Z = mstep_pi0(pi0_ss)
 
-        # ── M-step: Q_P ──
-        new_Q_P = mstep_Q_P(w_z, data, r_P, r_ω)
+        # ── M-step: Q_P (ordered probit) ──
+        new_probit_P, new_Q_P = mstep_Q_P(params_v3.probit_P, w_z, data, r_P, r_ω;
+                                            options=mstep_options)
 
         # ── M-step: income model ──
-        new_income = update_income_model(w_z, data.Y_income, r_P, r_ω; P_grid, ω_grid)
+        new_income = update_income_model(w_z, data.Y_income, r_P, r_ω;
+                                          P_grid, ω_grid, fix_betaω=fix_betaω)
+
+        # ── M-step: adult outcome emissions ──
+        has_adult_data = haskey(data, :X_adult) && !isempty(data.X_adult) &&
+                         haskey(data, :κ_adult) && !isempty(data.κ_adult)
+        if has_adult_data && haskey(params_v3, :adult_emission) &&
+           !isempty(params_v3.adult_emission.tau)
+            new_adult_emission, new_adult_matrices = mstep_adult_outcomes(
+                params_v3.adult_emission, γ_agg, w_z, data, r_θ, r_I, r_P, r_ω;
+                θ_grid, ω_grid, options=mstep_options)
+        else
+            new_adult_emission = haskey(params_v3, :adult_emission) ?
+                params_v3.adult_emission :
+                AdultOutcomeEmission(Vector{Float64}[], Float64[], Float64[])
+            new_adult_matrices = haskey(params_v3, :adult_matrices) ?
+                params_v3.adult_matrices : Array{Float64,3}[]
+        end
 
         # ── Convergence: max|ΔΠ| ──
         Pi_z_new = precompute_Pi_z(new_trans_specs, transition_groups,
@@ -662,8 +900,11 @@ function expectation_maximization_v3(
             π0 = new_π0, π_Z = new_π_Z,
             trans_specs = new_trans_specs,
             ccp_spec = new_ccp_spec,
+            probit_P = new_probit_P,
             Q_P = new_Q_P,
             income_model = new_income,
+            adult_emission = new_adult_emission,
+            adult_matrices = new_adult_matrices,
         )
         params_skill = (; r_θ, r_I, T,
             P_θ = P_θ_new, P_I = P_I_new,
@@ -677,9 +918,13 @@ function expectation_maximization_v3(
     # Final E-step
     Pi_z_final = precompute_Pi_z(params_v3.trans_specs, transition_groups,
                                    r_θ, r_I, r_P, r_ω; θ_grid, I_grid, P_grid, ω_grid)
+    CCP_init_final, CCP_trans_final = precompute_CCP_z(
+        params_v3.ccp_spec, r_Z, r_P, r_ω, bin_values, r_θ, r_I;
+        θ_grid, I_grid, P_grid, ω_grid)
     ll_final = expectation_step_v3!(
-        γ_agg, xi_sum_z, w_z, gamma_z_t1, ccp_xi_z, pi0_ss,
-        Pi_z_final, params_v3, params_skill, data;
+        γ_agg, xi_sum_z, w_z, gamma_z_t1, ccp_init_ss, ccp_trans_ss, pi0_ss,
+        Pi_z_final, CCP_init_final, CCP_trans_final, bin_map,
+        params_v3, params_skill, data;
         θ_grid, I_grid, P_grid, ω_grid)
     if verbose; println("  Final log-likelihood: $(round(ll_final; digits=2))"); end
 
@@ -705,8 +950,9 @@ function run_em_restarts_v3(data;
     config::NamedTuple = NamedTuple(),
     transition_groups::Vector{Vector{Int}} = [[1,2,3],[4,5,6]],
     mstep_options     = DEFAULT_OPTIM_OPTIONS,
+    n_income_bins::Int = 20,
 )
-    em_kw = (; transition_groups, mstep_options)
+    em_kw = (; transition_groups, mstep_options, n_income_bins)
 
     # Phase 1: screen
     println("  Phase 1: screening $n_initial candidates × $phase1_iters iters")
@@ -714,10 +960,14 @@ function run_em_restarts_v3(data;
     for i in 1:n_initial
         rng = MersenneTwister(42 + i)
         pv3, psk = initialize_params_v3(data, config; rng)
-        pv3, psk, _, _, _, ll = expectation_maximization_v3(
-            data, pv3, psk; maxiter=phase1_iters, verbose=false, em_kw...)
-        push!(candidates, (; pv3, psk, ll))
-        println("    Candidate $i/$n_initial: ll = $(round(ll; digits=2))")
+        try
+            pv3, psk, _, _, _, ll = expectation_maximization_v3(
+                data, pv3, psk; maxiter=phase1_iters, verbose=false, em_kw...)
+            push!(candidates, (; pv3, psk, ll))
+            println("    Candidate $i/$n_initial: ll = $(round(ll; digits=2))")
+        catch e
+            println("    Candidate $i/$n_initial: failed ($(typeof(e)))")
+        end
     end
     sort!(candidates; by=c -> c.ll, rev=true)
     resize!(candidates, n_semifinal)
@@ -782,10 +1032,19 @@ function display_results_v3(params_v3, params_skill, data)
 
     for (g, spec) in enumerate(trans_specs)
         println("\n  Transition group $g:")
-        println("    α₁(θ):   $(round.(spec.alpha1; digits=3))")
-        println("    α₂(I):   $(round.(exp.(spec.alpha2_raw); digits=3))")
-        println("    α₃(θ^P): $(round.(spec.alpha3; digits=3))")
-        println("    α₄(ω):   $(round.(spec.alpha4; digits=3))")
+        if spec isa RobitNNTransitionV3
+            println("    α₁(θ):   $(round.(spec.alpha1; digits=3))")
+            println("    α₂(I):   $(round.(exp.(spec.alpha2_raw); digits=3))")
+            println("    α₃(θ^P): $(round.(spec.alpha3; digits=3))")
+            println("    α₄(ω):   $(round.(spec.alpha4; digits=3))")
+        elseif spec isa OrderedProbitTransitionV3
+            println("    β₁(θ):   $(round(spec.beta1; digits=3))")
+            println("    β₂(I):   $(round(spec.beta2; digits=3))")
+            println("    β₃(θI):  $(round(spec.beta3; digits=3))")
+            println("    β₄(θ^P): $(round(spec.beta4; digits=3))")
+            println("    β₅(ω):   $(round(spec.beta5; digits=3))")
+            println("    c:       $(round.(spec.c; digits=3))")
+        end
     end
 
     println("\n  Q_P (ASVAB emissions):")
@@ -794,4 +1053,420 @@ function display_results_v3(params_v3, params_skill, data)
         vals = ["$(round(Q_P[m][end,kP]; digits=3))" for kP in 1:r_P]
         println("    $name  P(high|kP): $(join(vals, "  "))")
     end
+end
+
+# ─────────────────────────────────────────────────────────────────
+# V3 Inference: complementarity test on regime-marginalized Π̄
+# ─────────────────────────────────────────────────────────────────
+
+"""
+    marginalize_Pi_v3(trans_specs, transition_groups, π_Z, r_θ, r_I, r_P, r_ω;
+                       θ_grid, I_grid, P_grid, ω_grid) -> Vector{Array{Float64,3}}
+
+Compute Π̄[t] = Σ_z π_Z(z) · Π(z, t) for each transition.
+Returns T-1 arrays of size (r_θ, r_θ, r_I).
+"""
+function marginalize_Pi_v3(trans_specs::AbstractVector,
+                            transition_groups::Vector{Vector{Int}},
+                            π_Z::Matrix{Float64},
+                            r_θ::Int, r_I::Int, r_P::Int, r_ω::Int;
+                            θ_grid::AbstractVector=1.0:r_θ,
+                            I_grid::AbstractVector=1.0:r_I,
+                            P_grid::AbstractVector=1.0:r_P,
+                            ω_grid::AbstractVector=1.0:r_ω)
+    T_minus_1 = sum(length, transition_groups)
+    Pi_bar = Vector{Array{Float64,3}}(undef, T_minus_1)
+
+    for (g, group) in enumerate(transition_groups)
+        spec = trans_specs[g]
+        φ_g = _pack_spec(spec)
+        build_fn = _make_build_fn(spec, r_θ, r_I; θ_grid, I_grid)
+        Π_bar_g = zeros(r_θ, r_θ, r_I)
+        for kω in 1:r_ω, kP in 1:r_P
+            w = π_Z[kP, kω]
+            w < 1e-15 && continue
+            Π_z = build_fn(φ_g, P_grid[kP], ω_grid[kω])
+            Π_bar_g .+= w .* Π_z
+        end
+        for t in group
+            Pi_bar[t] = Π_bar_g
+        end
+    end
+    return Pi_bar
+end
+
+"""
+    compute_psi_all_v3(xi_sum_z, w_z, π_Z, r_θ, r_I, r_P, r_ω, T, N)
+        -> Array{Float64, 5}   (T-1, r_θ, r_θ, r_I, N)
+
+Compute per-child pairwise posteriors marginalized over regimes and I':
+    ψ[t, θ', θ, I, n] = Σ_z w(z,n) · Σ_{I'} ξ_z[t][θ', I', θ, I]
+
+These are the regime-marginalized analogue of V2's ψ_all, and can be
+fed directly into `get_score(ψ_t, Π̄)`.
+
+Note: requires running a fresh E-step that stores per-child ξ_z.
+Since the current E-step only stores ξ_sum_z (summed over n), we
+recompute from γ and the forward-backward. Instead, we use a simpler
+approach: run a dedicated pass that computes ψ directly.
+"""
+function compute_psi_all_v3(params_v3, params_skill, data,
+                              transition_groups::Vector{Vector{Int}};
+                              n_income_bins::Int=20)
+    (; r_P, r_ω, π0, π_Z, ccp_spec, Q_P, income_model, trans_specs) = params_v3
+    (; r_θ, r_I, T) = params_skill
+    N = data.N
+    r_Z = r_P * r_ω
+
+    # Bin income and precompute
+    bin_map, bin_values = bin_income(data.Y_income; n_bins=n_income_bins)
+    θ_grid = collect(1.0:r_θ); I_grid = collect(1.0:r_I)
+    P_grid = collect(1.0:r_P); ω_grid = collect(1.0:r_ω)
+
+    Pi_z_pre = precompute_Pi_z(trans_specs, transition_groups,
+                                 r_θ, r_I, r_P, r_ω; θ_grid, I_grid, P_grid, ω_grid)
+    CCP_init_pre, CCP_trans_pre = precompute_CCP_z(
+        ccp_spec, r_Z, r_P, r_ω, bin_values, r_θ, r_I;
+        θ_grid, I_grid, P_grid, ω_grid)
+
+    ψ_all = zeros(T-1, r_θ, r_θ, r_I, N)
+
+    # Scratch
+    α     = zeros(T, r_θ, r_I)
+    β     = zeros(T, r_θ, r_I)
+    scale = zeros(T)
+    L_scratch = [zeros(r_θ, r_I) for _ in 1:T]
+    γ_z   = zeros(T, r_θ, r_I)
+    ξ_z   = [zeros(r_θ, r_I, r_θ, r_I) for _ in 1:T-1]
+    CCP_nz = Vector{Array{Float64,3}}(undef, T-1)
+
+    log_π_Z   = [log(max(π_Z[kP, kω], 1e-300)) for kP in 1:r_P, kω in 1:r_ω]
+    log_ll_z  = zeros(r_Z)
+    π0_z_buf  = zeros(r_θ)
+    π0_nz_buf = zeros(r_θ, r_I)
+
+    for n in 1:N
+        for t in 1:T
+            compute_emission_likelihood_t!(L_scratch[t], t, n, params_skill, data)
+        end
+
+        # Pass 1: forward-backward per regime, store ξ_z per regime
+        ξ_all_z = [[zeros(r_θ, r_I, r_θ, r_I) for _ in 1:T-1] for _ in 1:r_Z]
+
+        for kω in 1:r_ω, kP in 1:r_P
+            z = regime_z(kP, kω, r_ω)
+
+            ll_regime = regime_loglik(n, kP, kω, Q_P, income_model, data;
+                                       P_grid, ω_grid)
+            log_ll_z[z] = log_π_Z[kP, kω] + ll_regime
+
+            for kθ in 1:r_θ; @inbounds π0_z_buf[kθ] = max(π0[kθ, kP, kω], 0.0); end
+            s = sum(π0_z_buf)
+            if s > 0; π0_z_buf ./= s; else; fill!(π0_z_buf, 1.0/r_θ); end
+
+            ccp_init = CCP_init_pre[z][bin_map[n, 1]]
+            for kI in 1:r_I, kθ in 1:r_θ
+                @inbounds π0_nz_buf[kθ, kI] = π0_z_buf[kθ] * ccp_init[kI, kθ]
+            end
+
+            for t in 1:T-1
+                CCP_nz[t] = CCP_trans_pre[z][bin_map[n, t+1]]
+            end
+
+            for t in 1:T-1; fill!(ξ_all_z[z][t], 0.0); end
+
+            ll_skills = forward_backward_v3_n!(
+                α, β, scale, γ_z, ξ_all_z[z],
+                π0_nz_buf, Pi_z_pre[z], CCP_nz, L_scratch, r_θ, r_I, T)
+            log_ll_z[z] += ll_skills
+        end
+
+        # Regime posteriors
+        log_max = maximum(log_ll_z)
+        w_unnorm = exp.(log_ll_z .- log_max)
+        w_sum = sum(w_unnorm)
+
+        # Accumulate ψ: marginalize over z and I'
+        for z in 1:r_Z
+            wz = w_unnorm[z] / w_sum
+            wz < 1e-15 && continue
+            for t in 1:T-1
+                ξ_t = ξ_all_z[z][t]
+                for kI in 1:r_I, kθ in 1:r_θ, kθ1 in 1:r_θ
+                    # ψ[t, θ', θ, I, n] = Σ_z w(z,n) · Σ_{I'} ξ_z[θ', I', θ, I]
+                    s = 0.0
+                    for kI1 in 1:r_I
+                        @inbounds s += ξ_t[kθ1, kI1, kθ, kI]
+                    end
+                    @inbounds ψ_all[t, kθ1, kθ, kI, n] += wz * s
+                end
+            end
+        end
+    end
+
+    return ψ_all
+end
+
+"""
+    _pi_bar_from_phi(build_fn, φ_g, π_Z_vec, r_P, r_ω; mode=:free)
+
+Generic: maps transition params → Π̄ (marginalized over regimes).
+`build_fn(φ, kP_val, kω_val)` returns a single-regime Π array (r_θ, r_θ, r_I).
+mode=:free returns (r_θ-1)*r_θ*r_I free entries; mode=:full returns all r_θ*r_θ*r_I.
+ForwardDiff-compatible.
+"""
+function _pi_bar_from_phi(build_fn, φ_g::AbstractVector, π_Z_vec::AbstractVector,
+                           r_θ::Int, r_I::Int, r_P::Int, r_ω::Int;
+                           P_grid::AbstractVector=1.0:r_P,
+                           ω_grid::AbstractVector=1.0:r_ω,
+                           mode::Symbol=:free)
+    T_el = promote_type(eltype(φ_g), eltype(π_Z_vec))
+    Π_bar = zeros(T_el, r_θ, r_θ, r_I)
+    for kω in 1:r_ω, kP in 1:r_P
+        z = (kP - 1) * r_ω + kω
+        w = π_Z_vec[z]
+        Π_z = build_fn(φ_g, P_grid[kP], ω_grid[kω])
+        Π_bar .+= w .* Π_z
+    end
+    if mode == :full
+        return vec(Π_bar)
+    else
+        v = Vector{T_el}(undef, (r_θ - 1) * r_θ * r_I)
+        idx = 0
+        for kI in 1:r_I, kθ in 1:r_θ, j in 1:(r_θ - 1)
+            idx += 1
+            v[idx] = Π_bar[j, kθ, kI]
+        end
+        return v
+    end
+end
+
+"""
+    _make_build_fn(spec, r_θ, r_I; θ_grid, I_grid)
+
+Returns a ForwardDiff-compatible `(φ, kP_val, kω_val) -> Π` function
+appropriate for the given spec type.
+"""
+function _make_build_fn(spec::RobitNNTransitionV3, r_θ::Int, r_I::Int;
+                         θ_grid::AbstractVector=1.0:r_θ, I_grid::AbstractVector=1.0:r_I)
+    K = spec.K; ν = spec.ν
+    return (φ, kP_val, kω_val) -> _build_robit_nn_v3_pi(φ, r_θ, r_I, K, ν,
+                                                           kP_val, kω_val; θ_grid, I_grid)
+end
+
+function _make_build_fn(spec::OrderedProbitTransitionV3, r_θ::Int, r_I::Int;
+                         θ_grid::AbstractVector=1.0:r_θ, I_grid::AbstractVector=1.0:r_I)
+    return (φ, kP_val, kω_val) -> _build_op_trans_v3_pi(φ, r_θ, r_I, kP_val, kω_val;
+                                                           θ_grid, I_grid)
+end
+
+"""Pack transition spec into parameter vector (dispatches on type)."""
+_pack_spec(s::RobitNNTransitionV3) = pack_robit_nn_v3(s)
+_pack_spec(s::OrderedProbitTransitionV3) = pack_op_trans_v3(s)
+
+"""
+    get_score_parametric_v3(ψ_all, Pi_bar, params_v3, transition_groups)
+        -> Vector{Matrix{Float64}}
+
+Parametric score dL/dφ_g for each transition group, using the chain rule:
+  dL/dφ_n = J_full' · dL/dΠ̄_vec_n
+
+where dL/dΠ̄[k,θ,I,n] = ψ[k,θ,I,n] / Π̄[k,θ,I] (score w.r.t. all Π̄ entries)
+and J_full = ∂vec(Π̄)/∂φ_g (Jacobian from robit params to full marginalized Π̄).
+
+Returns one (n_φ × N) score matrix per group, pooled across transitions in the group.
+"""
+function get_score_parametric_v3(ψ_all::Array{Float64,5},
+                                  Pi_bar::Vector{Array{Float64,3}},
+                                  params_v3,
+                                  transition_groups::Vector{Vector{Int}})
+    (; r_P, r_ω, trans_specs, π_Z) = params_v3
+    r_θ, _, r_I = size(Pi_bar[1])
+    N = size(ψ_all, 5)
+    r_Z = r_P * r_ω
+
+    θ_grid = collect(1.0:r_θ); I_grid = collect(1.0:r_I)
+    P_grid = collect(1.0:r_P); ω_grid = collect(1.0:r_ω)
+    π_Z_vec = Float64[π_Z[kP, kω] for kP in 1:r_P for kω in 1:r_ω]
+
+    score_list = Vector{Matrix{Float64}}(undef, length(transition_groups))
+
+    for (g, group) in enumerate(transition_groups)
+        t_rep = group[1]
+        spec_g = trans_specs[g]
+        φ_g = _pack_spec(spec_g)
+        build_fn = _make_build_fn(spec_g, r_θ, r_I)
+        n_φ = length(φ_g)
+
+        # Floor Π̄
+        Π_g = copy(Pi_bar[t_rep])
+        Π_g .= max.(Π_g, 1e-15)
+        for kI in 1:r_I, kθ in 1:r_θ
+            Π_g[:, kθ, kI] ./= sum(Π_g[:, kθ, kI])
+        end
+
+        # Jacobian ∂vec(Π̄)/∂φ_g  (n_pi_full × n_φ)
+        J_full = ForwardDiff.jacobian(
+            φ -> _pi_bar_from_phi(build_fn, φ, π_Z_vec, r_θ, r_I, r_P, r_ω;
+                                    P_grid, ω_grid, mode=:full),
+            φ_g)
+
+        # Score w.r.t. all Π̄ entries: dL/dΠ̄[k,θ,I,n] = ψ[k,θ,I,n] / Π̄[k,θ,I]
+        n_pi = r_θ * r_θ * r_I
+        pi_idx = LinearIndices((r_θ, r_θ, r_I))
+
+        # Pool across transitions in group, then chain rule
+        dL_dφ = zeros(n_φ, N)
+        for t in group
+            dL_dΠ = zeros(n_pi, N)
+            for n in 1:N, kI in 1:r_I, kθ in 1:r_θ, k in 1:r_θ
+                ip = pi_idx[k, kθ, kI]
+                @inbounds dL_dΠ[ip, n] = ψ_all[t, k, kθ, kI, n] / Π_g[k, kθ, kI]
+            end
+            # Chain rule: dL/dφ += J_full' · dL/dΠ̄
+            dL_dφ .+= J_full' * dL_dΠ
+        end
+
+        score_list[g] = dL_dφ
+    end
+
+    return score_list
+end
+
+"""
+    compute_Var_free_v3(ψ_all, Pi_bar, params_v3, data, transition_groups)
+        -> (Var_free_list, Σ_φ_list)
+
+Parametric delta-method Var(Π̄_free) per group:
+  1. Parametric score dL/dφ via chain rule (correct — no nonparametric score)
+  2. Σ_φ = cov(score_φ') — parametric score covariance
+  3. Var(φ̂) = inv(Σ_φ) / N
+  4. J_free = ∂Π̄_free/∂φ via ForwardDiff
+  5. Var(Π̄_free) = J_free · Var(φ̂) · J_free'
+"""
+function compute_Var_free_v3(ψ_all::Array{Float64,5},
+                               Pi_bar::Vector{Array{Float64,3}},
+                               params_v3,
+                               data,
+                               transition_groups::Vector{Vector{Int}})
+    (; r_θ, r_I, T, N) = data
+    (; r_P, r_ω, trans_specs, π_Z) = params_v3
+    T_minus_1 = T - 1
+
+    θ_grid = collect(1.0:r_θ); I_grid = collect(1.0:r_I)
+    P_grid = collect(1.0:r_P); ω_grid = collect(1.0:r_ω)
+    π_Z_vec = Float64[π_Z[kP, kω] for kP in 1:r_P for kω in 1:r_ω]
+
+    # Get parametric scores
+    score_list = get_score_parametric_v3(ψ_all, Pi_bar, params_v3, transition_groups)
+
+    Var_free_list = Vector{Matrix{Float64}}(undef, T_minus_1)
+    Σ_φ_list = Vector{Matrix{Float64}}(undef, length(transition_groups))
+
+    for (g, group) in enumerate(transition_groups)
+        spec_g = trans_specs[g]
+        φ_g = _pack_spec(spec_g)
+        build_fn = _make_build_fn(spec_g, r_θ, r_I)
+
+        # Identify active parameters (non-zero Jacobian columns)
+        J_free_full = ForwardDiff.jacobian(
+            φ -> _pi_bar_from_phi(build_fn, φ, π_Z_vec, r_θ, r_I, r_P, r_ω;
+                                    P_grid, ω_grid, mode=:free),
+            φ_g)
+        col_norms = [norm(J_free_full[:, j]) for j in 1:length(φ_g)]
+        active = findall(n -> n > 1e-6, col_norms)
+        n_active = length(active)
+        n_φ = length(φ_g)
+        if n_active < n_φ
+            @info "Group $g: $n_active / $n_φ active parameters ($(n_φ - n_active) dead)"
+        end
+
+        # Restrict score and Jacobian to active parameters
+        dL_active = score_list[g][active, :]
+        J_free = J_free_full[:, active]
+
+        # Parametric score covariance (active params only)
+        Σ_φ = cov(dL_active')
+        Σ_φ_list[g] = Σ_φ
+
+        # Var(φ̂)
+        r = rank(Σ_φ)
+        if r < n_active
+            @warn "Group $g: parametric score covariance has rank $r / $n_active; using pinv"
+            Var_φ = pinv(Σ_φ) / N
+        else
+            Var_φ = inv(Σ_φ) / N
+        end
+
+        # Delta method
+        Var_free_g = J_free * Var_φ * J_free'
+
+        for t in group
+            Var_free_list[t] = Var_free_g
+        end
+    end
+
+    return Var_free_list, Σ_φ_list
+end
+
+"""
+    get_test_stat_v3_grouped(Var_free_list, Pi_bar, data, transition_groups; α=0.05)
+
+Complementarity test on regime-marginalized Π̄ using parametric
+Var(Π̄_free) from the delta method.
+"""
+function get_test_stat_v3_grouped(Var_free_list::Vector{Matrix{Float64}},
+                                   Pi_bar::Vector{Array{Float64,3}},
+                                   data,
+                                   transition_groups::Vector{Vector{Int}};
+                                   α::Float64=0.05, rng::AbstractRNG=Random.default_rng())
+    # Grouped OC test on the regime-marginalized Π̄ (minimal adjacent constraint
+    # set; scale=1 since Var_free is the delta-method covariance, already O(1/N)).
+    (; r_θ, r_I, T, N) = data
+    S_mat = get_S_adjacent(r_θ, r_I)
+
+    results = Vector{NamedTuple}(undef, length(transition_groups))
+
+    for (g, group) in enumerate(transition_groups)
+        t_rep = group[1]
+
+        Π_g = copy(Pi_bar[t_rep])
+        Π_g .= max.(Π_g, 1e-15)
+        for kI in 1:r_I, kθ in 1:r_θ
+            Π_g[:, kθ, kI] ./= sum(Π_g[:, kθ, kI])
+        end
+        Π_vec = Π_g[1:end-1, :, :][:]
+        Var_free = Var_free_list[t_rep]
+
+        V = S_mat * Var_free * S_mat'        # variance of the DID conditions (O(1/N))
+        r = mmm_test(S_mat * Π_vec, V; scale = 1.0, α, rng)
+        results[g] = (; group, r.T_n, r.c_α, r.reject, r.Ω, r.n_used, Var_free)
+    end
+
+    return results
+end
+
+"""
+    survivor_se_v3_grouped(Var_free_list, Pi_bar, transition_groups)
+        -> Vector{Array{Float64,3}}
+
+Survivor function SEs from parametric Var(Π̄_free).
+Returns SE[t] of size (r_θ-1, r_θ, r_I) for each transition.
+"""
+function survivor_se_v3_grouped(Var_free_list::Vector{Matrix{Float64}},
+                                 Pi_bar::Vector{Array{Float64,3}},
+                                 transition_groups::Vector{Vector{Int}})
+    T_minus_1 = length(Var_free_list)
+    SE_list = Vector{Array{Float64,3}}(undef, T_minus_1)
+
+    for (g, group) in enumerate(transition_groups)
+        t_rep = group[1]
+        Π_g = Pi_bar[t_rep]
+        SE_list[t_rep] = survivor_se_all(Var_free_list[t_rep], Π_g)
+        for t in group[2:end]
+            SE_list[t] = SE_list[t_rep]
+        end
+    end
+
+    return SE_list
 end

@@ -1,5 +1,8 @@
 using LinearAlgebra, Distributions, Random
 
+# Full pairwise supermodularity-in-distribution constraint matrix (all (θ,I) and
+# cutpoint pairs).  Retained as a utility / for full-vs-minimal comparisons; the
+# tests use the minimal `get_S_adjacent` (same null, full rank).
 function get_S(r_θ, r_I)
     p_idx = LinearIndices((r_θ-1, r_θ, r_I))
     np = prod(size(p_idx))
@@ -26,36 +29,18 @@ end
 Compute the supermodularity test statistic, normalized covariance Ω,
 and score covariance Σ_score. Regularizes Ω if it has non-positive eigenvalues.
 """
-function get_test_stat(Q, p_est, data)
+function get_test_stat(Q, p_est, data; α::Float64=0.05, rng::AbstractRNG=Random.default_rng())
     r_θ, _, r_I, N = size(Q)
-    S = get_S(r_θ, r_I)
+    S = get_S_adjacent(r_θ, r_I)
 
     expectation_step!(Q, p_est, data)
     dL = get_score(Q, p_est.Π)
     Σ_score = cov(dL')
     Σ_inv = inv(Σ_score)
-
-    V = S * Σ_inv * S'
-    if any(x -> x ≤ 0, diag(V))
-        @warn "get_test_stat: V has non-positive diagonal; score covariance is degenerate — skipping test"
-        Ω_dummy = Matrix{Float64}(I, size(V))
-        return (; T_n=NaN, Ω=Ω_dummy, Σ_score)
-    end
-    D_inv = diagm(sqrt.(1 ./ diag(V)))
+    V = S * Σ_inv * S'                                   # ∝ Var(δ̂); score path ⇒ scale=√N
     Π_vec = p_est.Π[1:end-1, :, :][:]
-    Ω = D_inv * V * D_inv
-
-    # Regularize Ω if needed
-    eigvals_Ω = eigvals(Hermitian(Ω))
-    if minimum(eigvals_Ω) ≤ 0
-        ε = abs(minimum(eigvals_Ω)) + 1e-6
-        Ω += ε * I
-    end
-
-    stat_vec = sqrt(N) * D_inv * S * Π_vec
-    T_n = sum(min.(0.0, stat_vec) .^ 2)
-
-    return (; T_n, Ω, Σ_score)
+    r = mmm_test(S * Π_vec, V; scale = sqrt(N), α, rng)
+    return (; r.T_n, r.Ω, Σ_score)
 end
 
 function crit_value(Ω, α; nsim = 100_000, rng::AbstractRNG=Random.default_rng())
@@ -69,10 +54,163 @@ function crit_value(Ω, α; nsim = 100_000, rng::AbstractRNG=Random.default_rng(
     for r in 1:nsim
         randn!(rng, z)
         mul!(Lz, L, z)
-        T[r] = sum(x -> min(0.0, x)^2, Lz)
+        T[r] = sum(x -> max(0.0, x)^2, Lz)   # least-favorable null of the MMM statistic
     end
 
     return quantile(T, 1 - α)
+end
+
+"""
+    crit_value_sup(Ω, α; nsim, rng) -> (c_super, c_sub)
+
+Least-favourable critical values for the DIRECTED (sup-type) twin of the MMM
+statistic, simulated from ζ ~ N(0,Ω) using the SAME Cholesky-of-Ω draws as
+`crit_value`, but aggregating by the single worst coordinate instead of a
+sum-of-squares:
+
+  • `c_super` = (1-α) quantile of  (min(0, minimum(Lζ)))²   [complementarity side]
+  • `c_sub`   = (1-α) quantile of  (max(0, maximum(Lζ)))²   [substitutability side]
+
+Reuse `rng` for reproducibility. All moments treated as binding (no GMS).
+"""
+function crit_value_sup(Ω, α; nsim = 100_000, rng::AbstractRNG=Random.default_rng())
+    L = cholesky(Hermitian(Ω)).L
+    d = size(Ω, 1)
+
+    Tsuper = zeros(nsim)   # (min(0, min_j Lζ_j))²
+    Tsub   = zeros(nsim)   # (max(0, max_j Lζ_j))²
+    z  = zeros(d)
+    Lz = zeros(d)
+
+    for r in 1:nsim
+        randn!(rng, z)
+        mul!(Lz, L, z)
+        mn = minimum(Lz); mx = maximum(Lz)
+        Tsuper[r] = min(0.0, mn)^2
+        Tsub[r]   = max(0.0, mx)^2
+    end
+
+    return (c_super = quantile(Tsuper, 1 - α), c_sub = quantile(Tsub, 1 - α))
+end
+
+# ─────────────────────────────────────────────────────────────────
+# Romano–Shaikh–Wolf (2014) two-step moment-selection critical value.
+# Survival convention: for :super the null is m ≥ 0 (penalize the negative
+# part), for :sub the null is m ≤ 0 (penalize the positive part).
+# `z` is the √N-standardized moment vector; Ω its correlation matrix.
+#   κ_β  = (1-β)-quantile of  max_j Z_j,  Z ~ N(0,Ω)   [correlation-aware slack]
+#   μ̂_β = (z - κ_β) ∨ 0   (:super)   /   (z + κ_β) ∧ 0   (:sub)
+#   crit = (1-(α-β))-quantile of  ‖W ∧ 0‖²  (:super) with W ~ N(μ̂_β, Ω)
+# If every moment is safely satisfied (μ̂_β strictly interior) return Inf
+# (auto fail-to-reject), matching RSW's (1 - 1{μ̂_β interior}) factor.
+# ─────────────────────────────────────────────────────────────────
+function crit_value_rsw(Ω, z::AbstractVector, α; direction::Symbol = :super,
+                        β::Real = α / 10, nsim = 50_000,
+                        rng::AbstractRNG = Random.default_rng())
+    d = size(Ω, 1)
+    L = cholesky(Hermitian(Ω)).L
+    ζ = zeros(d); Lζ = zeros(d)
+    # κ_β : simulated (1-β)-quantile of max_j Z_j
+    mx = zeros(nsim)
+    for r in 1:nsim
+        randn!(rng, ζ); mul!(Lζ, L, ζ)
+        mx[r] = maximum(Lζ)
+    end
+    κβ = quantile(mx, 1 - β)
+    if direction === :super
+        μ = max.(z .- κβ, 0.0)
+        all(>(0.0), μ) && return Inf
+    else
+        μ = min.(z .+ κβ, 0.0)
+        all(<(0.0), μ) && return Inf
+    end
+    T = zeros(nsim)
+    for r in 1:nsim
+        randn!(rng, ζ); mul!(Lζ, L, ζ)
+        s = 0.0
+        @inbounds for j in 1:d
+            w = μ[j] + Lζ[j]
+            s += direction === :super ? min(0.0, w)^2 : max(0.0, w)^2
+        end
+        T[r] = s
+    end
+    return quantile(T, 1 - (α - β))
+end
+
+# ─────────────────────────────────────────────────────────────────
+# Supermodularity-in-distribution (ordinal-complementarity) test.
+#
+# OC is  F(y|x∨y) + F(y|x∧y) ≤ F(y|x) + F(y|x'),  i.e.  δ = S·Π ≤ 0, where S·Π is
+# the CDF diff-in-difference built by `get_S_adjacent`.  A VIOLATION is δ > 0, so
+# the modified-method-of-moments statistic penalizes the POSITIVE part of δ̂,
+# T = Σ max(0, δ̂/se)²  (the draft's ‖Δ ∨ 0‖²); rejection ⇒ OC violated.
+#
+# `get_S_adjacent` is the minimal generating set of inequalities — the adjacent
+# unit-cell cross-differences — which defines the same null as the full pairwise
+# `get_S` but is full rank (no rank-deficient Ω) and more powerful.  All
+# `get_test_stat*` use it.  `mmm_test` drops degenerate (≈constant) inequalities.
+# ─────────────────────────────────────────────────────────────────
+
+"""
+    get_S_adjacent(r_θ, r_I) -> S
+
+Minimal supermodularity-in-distribution constraint matrix: one row per
+(adjacent skill increment θ→θ+1, adjacent investment increment I→I+1, cutpoint
+k).  Same CDF diff-in-difference sign convention as `get_S` (so `S·Π` is the CDF
+DID and OC ⟺ `S·Π ≤ 0`), restricted to consecutive cells.  `(r_θ-1)(r_I-1)(r_θ-1)`
+rows vs `r_θ(r_θ-1)²r_I(r_I-1)/4` for `get_S`.
+"""
+function get_S_adjacent(r_θ, r_I)
+    p_idx = LinearIndices((r_θ-1, r_θ, r_I))
+    ncut  = r_θ - 1
+    nrow  = (r_θ-1) * (r_I-1) * ncut
+    S = zeros(nrow, prod(size(p_idx)))
+    r_index = 1
+    for kθ in 1:(r_θ-1), kI in 1:(r_I-1)
+        for k in 1:ncut
+            S[r_index, p_idx[1, kθ,   kI  ]:p_idx[k, kθ,   kI  ]] .=  1.0
+            S[r_index, p_idx[1, kθ+1, kI+1]:p_idx[k, kθ+1, kI+1]] .=  1.0
+            S[r_index, p_idx[1, kθ,   kI+1]:p_idx[k, kθ,   kI+1]] .= -1.0
+            S[r_index, p_idx[1, kθ+1, kI  ]:p_idx[k, kθ+1, kI  ]] .= -1.0
+            r_index += 1
+        end
+    end
+    return S
+end
+
+"""
+    mmm_test(δ̂, V; scale=1.0, α=0.05, rng) -> (; T_n, c_α, reject, Ω, n_used)
+
+Modified-method-of-moments test of `H₀: δ ≤ 0` for the inequality estimates
+`δ̂ = S·Π̂`.  `T = Σ max(0, stat)²` with `stat = scale · diag(V)^{-1/2} · δ̂`;
+rejection ⇒ OC violated.
+
+`V` is proportional to `Var(δ̂)`; `scale` makes `stat` have unit variance — pass
+`scale = √N` when `V = S Σ̂⁻¹ S'` (per-observation score covariance) and
+`scale = 1` when `V = S Var(Π̂_free) S'` (delta-method covariance, already O(1/N)).
+Degenerate (≈constant) inequalities are dropped before standardizing.
+"""
+function mmm_test(δ̂::AbstractVector, V::AbstractMatrix;
+                  scale::Real=1.0, α::Real=0.05, direction::Symbol=:upper,
+                  rng::AbstractRNG=Random.default_rng())
+    dV   = diag(V)
+    tol  = 1e-10 * max(maximum(dV), 1.0)
+    keep = findall(>(tol), dV)
+    isempty(keep) && return (; T_n=0.0, c_α=0.0, reject=false, Ω=zeros(0, 0), n_used=0)
+
+    δk = δ̂[keep]; Vk = V[keep, keep]; dk = dV[keep]
+    D_inv = diagm(1.0 ./ sqrt.(dk))
+    Ω = Matrix(Symmetric(D_inv * Vk * D_inv))
+    mn = minimum(eigvals(Symmetric(Ω)))
+    mn ≤ 0 && (Ω += (abs(mn) + 1e-6) * I)
+
+    stat = (scale .* D_inv) * δk
+    # :upper tests H0: δ ≤ 0 (penalize positive part — the OC/complementarity test);
+    # :lower tests H0: δ ≥ 0 (penalize negative part — the substitutability test).
+    # The least-favorable null is symmetric, so the same `crit_value` serves both.
+    T_n  = direction === :lower ? sum(min.(0.0, stat) .^ 2) : sum(max.(0.0, stat) .^ 2)
+    c_α  = crit_value(Hermitian(Ω), α; rng = rng)
+    return (; T_n, c_α, reject = T_n > c_α, Ω, n_used = length(keep))
 end
 
 function monte_carlo_simulation(p; N = 1_000, nboot = 500, seed0 = 102025)
@@ -230,37 +368,20 @@ Compute the supermodularity test statistic using parametric score covariance.
 The S matrix operates on Π-space regardless of parameterization.
 """
 function get_test_stat_parametric(Q, p_est, data, specs::Dict{Symbol,Any},
-                                   config::NamedTuple)
+                                   config::NamedTuple; α::Float64=0.05, rng::AbstractRNG=Random.default_rng())
     r_θ, _, r_I, N = size(Q)
-    S = get_S(r_θ, r_I)
+    S = get_S_adjacent(r_θ, r_I)
 
     expectation_step!(Q, p_est, data)
 
-    # Get score w.r.t. the free parameters of the nonparametric Π
-    # (The S matrix is defined in terms of these, not the parametric params)
+    # Score w.r.t. the free parameters of the nonparametric Π (S is in this space)
     dL_np = get_score(Q, p_est.Π)
     Σ_score_np = cov(dL_np')
     Σ_inv_np = inv(Σ_score_np)
-
-    V = S * Σ_inv_np * S'
-    if any(x -> x ≤ 0, diag(V))
-        @warn "get_test_stat_parametric: V has non-positive diagonal; score covariance is degenerate — skipping test"
-        Ω_dummy = Matrix{Float64}(I, size(V))
-        return (; T_n=NaN, Ω=Ω_dummy, Σ_score=Σ_score_np)
-    end
-    D_inv = diagm(sqrt.(1 ./ diag(V)))
+    V = S * Σ_inv_np * S'                                # score path ⇒ scale=√N
     Π_vec = p_est.Π[1:end-1, :, :][:]
-    Ω = D_inv * V * D_inv
-
-    # Regularize Ω if needed
-    eigvals_Ω = eigvals(Hermitian(Ω))
-    if minimum(eigvals_Ω) ≤ 0
-        ε = abs(minimum(eigvals_Ω)) + 1e-6
-        Ω += ε * I
-    end
-
-    stat_vec = sqrt(N) * D_inv * S * Π_vec
-    T_n = sum(min.(0.0, stat_vec) .^ 2)
+    r = mmm_test(S * Π_vec, V; scale = sqrt(N), α, rng)
+    T_n = r.T_n; Ω = r.Ω
 
     # Also compute parametric score if applicable
     if config.transition != :nonparametric
@@ -534,9 +655,9 @@ Returns a vector of T-1 NamedTuples, each containing:
   - Ω: normalized covariance matrix
 """
 function get_test_stat_mp_parametric(Var_free_list::Vector{Matrix{Float64}},
-                                     params, data; α::Float64=0.05)
+                                     params, data; α::Float64=0.05, rng::AbstractRNG=Random.default_rng())
     (; r_θ, r_I, T, N) = data
-    S = get_S(r_θ, r_I)
+    S = get_S_adjacent(r_θ, r_I)
 
     results = Vector{NamedTuple}(undef, T-1)
 
@@ -550,40 +671,9 @@ function get_test_stat_mp_parametric(Var_free_list::Vector{Matrix{Float64}},
         Var_free = Var_free_list[t]
         Π_vec = Π_t[1:end-1, :, :][:]
 
-        # Variance of inequality vector via parametric delta method
-        V = S * Var_free * S'
-
-        # Check for near-zero diagonal entries
-        d_V = diag(V)
-        if any(d_V .<= 0)
-            @warn "Period $t: V has non-positive diagonal entries; skipping test"
-            d_Ω = size(S, 1)
-            Ω_dummy = Matrix{Float64}(I, d_Ω, d_Ω)
-            results[t] = (; t, T_n=NaN, c_α=NaN, reject=false, Ω=Ω_dummy)
-            continue
-        end
-
-        D_inv = diagm(1.0 ./ sqrt.(d_V))
-        Ω = D_inv * V * D_inv
-
-        # Regularize Ω if needed
-        eigvals_Ω = eigvals(Hermitian(Ω))
-        if minimum(eigvals_Ω) ≤ 0
-            ε = abs(minimum(eigvals_Ω)) + 1e-6
-            Ω += ε * I
-        end
-
-        stat_vec = D_inv * S * Π_vec ./ sqrt.(d_V)  # Π_vec / se
-        # Equivalently: stat_vec[k] = (S * Π_vec)[k] / sqrt(V[k,k])
-        # But we need to be careful: D_inv * S * Π_vec already divides by sqrt(V_kk)
-        # so stat_vec = D_inv * S * Π_vec is the vector of (violation / se)
-        stat_vec = D_inv * S * Π_vec
-
-        T_n = sum(min.(0.0, stat_vec) .^ 2)
-
-        c_α = crit_value(Hermitian(Ω), α)
-
-        results[t] = (; t, T_n, c_α, reject = T_n > c_α, Ω)
+        V = S * Var_free * S'                            # delta-method cov ⇒ scale=1
+        r = mmm_test(S * Π_vec, V; scale = 1.0, α, rng)
+        results[t] = (; t, r.T_n, r.c_α, r.reject, r.Ω)
     end
 
     return results
@@ -610,9 +700,10 @@ Returns a vector of T-1 NamedTuples, each containing:
   - Ω: normalized covariance matrix
   - Σ_score: score covariance matrix
 """
-function get_test_stat_mp(ψ_all::Array{Float64,5}, params, data; α::Float64=0.05)
+function get_test_stat_mp(ψ_all::Array{Float64,5}, params, data; α::Float64=0.05,
+                          rng::AbstractRNG=Random.default_rng())
     (; r_θ, r_I, T, N) = data
-    S = get_S(r_θ, r_I)
+    S = get_S_adjacent(r_θ, r_I)
 
     results = Vector{NamedTuple}(undef, T-1)
 
@@ -649,30 +740,10 @@ function get_test_stat_mp(ψ_all::Array{Float64,5}, params, data; α::Float64=0.
             Σ_inv = inv(Σ_score)
         end
 
-        V = S * Σ_inv * S'
-        if any(x -> x ≤ 0, diag(V))
-            @warn "Period $t: V has non-positive diagonal; score covariance is degenerate — skipping test"
-            Ω_dummy = Matrix{Float64}(I, size(V))
-            results[t] = (; t, T_n=NaN, c_α=NaN, reject=false, Ω=Ω_dummy, Σ_score)
-            continue
-        end
-        D_inv = diagm(sqrt.(1 ./ diag(V)))
+        V = S * Σ_inv * S'                               # score path ⇒ scale=√N
         Π_vec = Π_t[1:end-1, :, :][:]
-        Ω = D_inv * V * D_inv
-
-        # Regularize Ω if needed
-        eigvals_Ω = eigvals(Hermitian(Ω))
-        if minimum(eigvals_Ω) ≤ 0
-            ε = abs(minimum(eigvals_Ω)) + 1e-6
-            Ω += ε * I
-        end
-
-        stat_vec = sqrt(N) * D_inv * S * Π_vec
-        T_n = sum(min.(0.0, stat_vec) .^ 2)
-
-        c_α = crit_value(Hermitian(Ω), α)
-
-        results[t] = (; t, T_n, c_α, reject = T_n > c_α, Ω, Σ_score)
+        mt = mmm_test(S * Π_vec, V; scale = sqrt(N), α, rng)
+        results[t] = (; t, mt.T_n, mt.c_α, mt.reject, mt.Ω, Σ_score)
     end
 
     return results
@@ -691,9 +762,9 @@ scores. Returns one test result per group.
 """
 function get_test_stat_mp_grouped(ψ_all::Array{Float64,5}, params, data,
                                   transition_groups::Vector{Vector{Int}};
-                                  α::Float64=0.05)
+                                  α::Float64=0.05, rng::AbstractRNG=Random.default_rng())
     (; r_θ, r_I, T, N) = data
-    S = get_S(r_θ, r_I)
+    S = get_S_adjacent(r_θ, r_I)
 
     results = Vector{NamedTuple}(undef, length(transition_groups))
 
@@ -732,29 +803,10 @@ function get_test_stat_mp_grouped(ψ_all::Array{Float64,5}, params, data,
             Σ_inv = inv(Σ_score)
         end
 
-        V = S * Σ_inv * S'
-        if any(x -> x ≤ 0, diag(V))
-            @warn "Group $g: V has non-positive diagonal; score covariance is degenerate — skipping test"
-            Ω_dummy = Matrix{Float64}(I, size(V))
-            results[g] = (; group, T_n=NaN, c_α=NaN, reject=false, Ω=Ω_dummy, Σ_score)
-            continue
-        end
-        D_inv = diagm(sqrt.(1 ./ diag(V)))
+        V = S * Σ_inv * S'                               # score path ⇒ scale=√N
         Π_vec = Π_g[1:end-1, :, :][:]
-        Ω = D_inv * V * D_inv
-
-        eigvals_Ω = eigvals(Hermitian(Ω))
-        if minimum(eigvals_Ω) ≤ 0
-            ε = abs(minimum(eigvals_Ω)) + 1e-6
-            Ω += ε * I
-        end
-
-        stat_vec = sqrt(N) * D_inv * S * Π_vec
-        T_n = sum(min.(0.0, stat_vec) .^ 2)
-
-        c_α = crit_value(Hermitian(Ω), α)
-
-        results[g] = (; group, T_n, c_α, reject = T_n > c_α, Ω, Σ_score)
+        mt = mmm_test(S * Π_vec, V; scale = sqrt(N), α, rng)
+        results[g] = (; group, mt.T_n, mt.c_α, mt.reject, mt.Ω, Σ_score)
     end
 
     return results
@@ -770,9 +822,9 @@ When Π is shared within a group, the per-transition Var_free matrices are summe
 function get_test_stat_mp_parametric_grouped(Var_free_list::Vector{Matrix{Float64}},
                                               params, data,
                                               transition_groups::Vector{Vector{Int}};
-                                              α::Float64=0.05)
+                                              α::Float64=0.05, rng::AbstractRNG=Random.default_rng())
     (; r_θ, r_I, T, N) = data
-    S = get_S(r_θ, r_I)
+    S = get_S_adjacent(r_θ, r_I)
 
     results = Vector{NamedTuple}(undef, length(transition_groups))
 
@@ -788,33 +840,11 @@ function get_test_stat_mp_parametric_grouped(Var_free_list::Vector{Matrix{Float6
         # Pool Var_free: sum across transitions (additive Fisher information)
         Var_free_pooled = sum(Var_free_list[t] for t in group)
 
+        # Pool Var_free across the group (additive Fisher information)
         Π_vec = Π_g[1:end-1, :, :][:]
-        V = S * Var_free_pooled * S'
-
-        d_V = diag(V)
-        if any(d_V .<= 0)
-            @warn "Group $g: V has non-positive diagonal entries; skipping test"
-            d_Ω = size(S, 1)
-            Ω_dummy = Matrix{Float64}(I, d_Ω, d_Ω)
-            results[g] = (; group, T_n=NaN, c_α=NaN, reject=false, Ω=Ω_dummy)
-            continue
-        end
-
-        D_inv = diagm(1.0 ./ sqrt.(d_V))
-        Ω = D_inv * V * D_inv
-
-        eigvals_Ω = eigvals(Hermitian(Ω))
-        if minimum(eigvals_Ω) ≤ 0
-            ε = abs(minimum(eigvals_Ω)) + 1e-6
-            Ω += ε * I
-        end
-
-        stat_vec = D_inv * S * Π_vec
-        T_n = sum(min.(0.0, stat_vec) .^ 2)
-
-        c_α = crit_value(Hermitian(Ω), α)
-
-        results[g] = (; group, T_n, c_α, reject = T_n > c_α, Ω)
+        V = S * Var_free_pooled * S'                     # delta-method cov ⇒ scale=1
+        mt = mmm_test(S * Π_vec, V; scale = 1.0, α, rng)
+        results[g] = (; group, mt.T_n, mt.c_α, mt.reject, mt.Ω)
     end
 
     return results

@@ -8,6 +8,89 @@
 # ═══════════════════════════════════════════════════════════════
 
 # ─────────────────────────────────────────────────────────────────
+# OrderedProbitTransitionV3 — simple parametric baseline for warm-start
+# ─────────────────────────────────────────────────────────────────
+
+"""
+    OrderedProbitTransitionV3
+
+    P(θ'≤k | θ,I,θ^P,ω) = Φ(c_k - β₁θ - β₂I - β₃θI - β₄θ^P - β₅ω)
+
+Pack: [c_reparam(r_θ-1), β₁, β₂, β₃, β₄, β₅] = (r_θ-1)+5 params.
+"""
+struct OrderedProbitTransitionV3
+    c::Vector{Float64}   # r_θ-1 increasing cutpoints
+    beta1::Float64        # θ
+    beta2::Float64        # I
+    beta3::Float64        # θ·I
+    beta4::Float64        # θ^P
+    beta5::Float64        # ω
+end
+
+function pack_op_trans_v3(s::OrderedProbitTransitionV3)
+    vcat(_pack_cutpoints(s.c), s.beta1, s.beta2, s.beta3, s.beta4, s.beta5)
+end
+
+function unpack_op_trans_v3(v::AbstractVector, r_θ::Int)
+    nc = r_θ - 1
+    c = _unpack_cutpoints(v[1:nc])
+    OrderedProbitTransitionV3(c, v[nc+1], v[nc+2], v[nc+3], v[nc+4], v[nc+5])
+end
+
+"""
+Build Π[θ',θ,I] for a single regime (kP_val, kω_val). ForwardDiff-compatible.
+"""
+function _build_op_trans_v3_pi(vec::AbstractVector{T}, r_θ::Int, r_I::Int,
+                                kP_val::Real, kω_val::Real;
+                                θ_grid::AbstractVector=1.0:r_θ,
+                                I_grid::AbstractVector=1.0:r_I) where T
+    nc = r_θ - 1
+    c  = _unpack_cutpoints(vec[1:nc])
+    β1, β2, β3, β4, β5 = vec[nc+1], vec[nc+2], vec[nc+3], vec[nc+4], vec[nc+5]
+
+    regime_part = β4 * kP_val + β5 * kω_val
+    Π = zeros(T, r_θ, r_θ, r_I)
+    for kI in 1:r_I, kθ in 1:r_θ
+        η = β1 * θ_grid[kθ] + β2 * I_grid[kI] + β3 * θ_grid[kθ] * I_grid[kI] + regime_part
+        Π[:, kθ, kI] = _ordered_probit_pmf(c, η, r_θ)
+    end
+    return Π
+end
+
+"""
+Negative log-likelihood summed over all regimes. ForwardDiff-compatible.
+"""
+function transition_negll_op_v3(vec::AbstractVector{T},
+                                 Q_sum_z::Vector{Array{Float64,3}},
+                                 r_θ::Int, r_I::Int,
+                                 r_P::Int, r_ω::Int;
+                                 θ_grid::AbstractVector=1.0:r_θ,
+                                 I_grid::AbstractVector=1.0:r_I,
+                                 P_grid::AbstractVector=1.0:r_P,
+                                 ω_grid::AbstractVector=1.0:r_ω) where T
+    negll = zero(T)
+    for kω in 1:r_ω, kP in 1:r_P
+        z = (kP - 1) * r_ω + kω
+        Π_z = _build_op_trans_v3_pi(vec, r_θ, r_I, P_grid[kP], ω_grid[kω];
+                                      θ_grid, I_grid)
+        negll += _transition_negll_precomputed(Π_z, Q_sum_z[z])
+    end
+    return negll
+end
+
+function initialize_op_trans_v3(r_θ::Int; rng::AbstractRNG=Random.default_rng())
+    nc = r_θ - 1
+    c = collect(range(-1.0, 1.0; length=nc)) .+ 0.02 .* randn(rng, nc)
+    sort!(c)
+    OrderedProbitTransitionV3(c,
+        0.1 + 0.02 * randn(rng),   # β₁ (θ)
+        0.1 + 0.02 * randn(rng),   # β₂ (I)
+        0.0,                         # β₃ (θI)
+        0.02 * randn(rng),          # β₄ (θ^P)
+        0.02 * randn(rng))          # β₅ (ω)
+end
+
+# ─────────────────────────────────────────────────────────────────
 # RobitNNTransitionV3
 # ─────────────────────────────────────────────────────────────────
 
@@ -168,13 +251,15 @@ struct OrderedProbitCCPV3
 end
 
 function pack_ccp_v3(s::OrderedProbitCCPV3)
-    vcat(_pack_cutpoints(s.c), s.beta1, s.beta2, s.beta3, s.beta4, s.beta5)
+    # β₂ (I_old) is fixed at zero — not optimized
+    vcat(_pack_cutpoints(s.c), s.beta1, s.beta3, s.beta4, s.beta5)
 end
 
 function unpack_ccp_v3(v::AbstractVector, r_I::Int)
     nc = r_I - 1
     c = _unpack_cutpoints(v[1:nc])
-    OrderedProbitCCPV3(c, v[nc+1], v[nc+2], v[nc+3], v[nc+4], v[nc+5])
+    # β₂ fixed at zero
+    OrderedProbitCCPV3(c, v[nc+1], 0.0, v[nc+2], v[nc+3], v[nc+4])
 end
 
 """
@@ -215,6 +300,24 @@ function build_ccp_v3_trans(spec::OrderedProbitCCPV3, kP_val::Real, kω_val::Rea
 end
 
 """
+    _ordered_probit_logprob(c, η, k, nc)
+
+Log-probability of category `k` from an ordered probit with cutpoints `c`
+and index `η`.  `nc = length(c) = r_I - 1`.  No allocation.
+ForwardDiff-compatible.
+"""
+@inline function _ordered_probit_logprob(c, η, k::Int, nc::Int)
+    if k == 1
+        p = Φ(c[1] - η)
+    elseif k > nc
+        p = one(typeof(η)) - Φ(c[nc] - η)
+    else
+        p = Φ(c[k] - η) - Φ(c[k-1] - η)
+    end
+    return log(max(p, typeof(η)(1e-12)))
+end
+
+"""
     ccp_negll_v3(vec, ccp_xi_z, gamma_z_t1, w_z, Y_income, r_θ, r_I, r_P, r_ω, T; grids...)
 
 Negative expected complete-data log-likelihood for the V3 CCP.
@@ -251,11 +354,10 @@ function ccp_negll_v3(vec::AbstractVector{Tv},
             ip1 = isnan(y1) ? zero(Tv) : β5 * y1
             for kθ in 1:r_θ
                 η = β1 * θ_grid[kθ] + rp + ip1
-                pmf = _ordered_probit_pmf(c, η, r_I)
                 for kI in 1:r_I
                     @inbounds g = gamma_z_t1[kθ, kI, z, n]
                     g < 1e-15 && continue
-                    negll -= w * g * log(max(pmf[kI], Tv(1e-15)))
+                    negll -= w * g * _ordered_probit_logprob(c, η, kI, nc)
                 end
             end
 
@@ -267,11 +369,180 @@ function ccp_negll_v3(vec::AbstractVector{Tv},
                     base_η = β1 * θ_grid[kθ1] + rp + ip
                     for kI in 1:r_I
                         η = base_η + β2 * I_grid[kI]
-                        pmf = _ordered_probit_pmf(c, η, r_I)
                         for kI1 in 1:r_I
                             @inbounds ξv = ccp_xi_z[kI1, kI, kθ1, z, t, n]
                             ξv < 1e-15 && continue
-                            negll -= w * ξv * log(max(pmf[kI1], Tv(1e-15)))
+                            negll -= w * ξv * _ordered_probit_logprob(c, η, kI1, nc)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return negll
+end
+
+# ─────────────────────────────────────────────────────────────────
+# Binned CCP objective: pre-aggregate sufficient statistics by
+# discretized income to eliminate the N loop from the optimizer.
+# ─────────────────────────────────────────────────────────────────
+
+"""
+    bin_income(Y_income; n_bins=20) -> (bin_map, bin_values)
+
+Discretize income into quantile-based bins.  Missing (NaN) gets its own
+bin (index n_bins+1) with value 0.0 (income term dropped).
+
+Returns:
+  bin_map   — N×T Int matrix of bin indices
+  bin_values — length n_bins+1 vector of bin midpoints (mean within bin)
+"""
+function bin_income(Y_income::Matrix{Float64}; n_bins::Int=20)
+    N, Tp = size(Y_income)
+    obs = filter(!isnan, vec(Y_income))
+
+    # Handle all-missing income: everyone goes to the missing bin
+    if isempty(obs)
+        bin_map = fill(1, N, Tp)  # single bin (the missing bin)
+        bin_values = [0.0]         # missing bin value
+        return bin_map, bin_values
+    end
+
+    # Quantile bin edges
+    edges = quantile(obs, range(0, 1; length=n_bins+1))
+    # Ensure distinct edges
+    for i in 2:length(edges)
+        edges[i] = max(edges[i], edges[i-1] + 1e-10)
+    end
+
+    bin_map = zeros(Int, N, Tp)
+    bin_sums = zeros(n_bins)
+    bin_counts = zeros(Int, n_bins)
+
+    for t in 1:Tp, n in 1:N
+        y = Y_income[n, t]
+        if isnan(y)
+            bin_map[n, t] = n_bins + 1  # missing bin
+        else
+            # Binary search for bin
+            b = searchsortedlast(edges, y)
+            b = clamp(b, 1, n_bins)
+            bin_map[n, t] = b
+            bin_sums[b] += y
+            bin_counts[b] += 1
+        end
+    end
+
+    bin_values = zeros(n_bins + 1)
+    for b in 1:n_bins
+        bin_values[b] = bin_counts[b] > 0 ? bin_sums[b] / bin_counts[b] : edges[b]
+    end
+    bin_values[n_bins + 1] = 0.0  # missing: income term will be zero
+
+    return bin_map, bin_values
+end
+
+"""
+    aggregate_ccp_ss(ccp_xi_z, gamma_z_t1, w_z, bin_map, n_total_bins, r_θ, r_I, r_Z, T)
+        -> (init_ss, trans_ss)
+
+Pre-aggregate CCP sufficient statistics by income bin.
+
+Returns:
+  init_ss  — (r_θ, r_I, r_Z, n_total_bins)  weighted gamma at t=1
+  trans_ss — (r_I, r_I, r_θ, r_Z, T-1, n_total_bins)  weighted xi
+"""
+function aggregate_ccp_ss(ccp_xi_z::Array{Float64,6},
+                           gamma_z_t1::Array{Float64,4},
+                           w_z::Matrix{Float64},
+                           bin_map::Matrix{Int},
+                           n_total_bins::Int,
+                           r_θ::Int, r_I::Int, r_Z::Int, T::Int)
+    N = size(w_z, 2)
+
+    init_ss  = zeros(r_θ, r_I, r_Z, n_total_bins)
+    trans_ss = zeros(r_I, r_I, r_θ, r_Z, T-1, n_total_bins)
+
+    for n in 1:N
+        # Initial period
+        b1 = bin_map[n, 1]
+        for z in 1:r_Z
+            @inbounds wz = w_z[z, n]
+            wz < 1e-15 && continue
+            for kI in 1:r_I, kθ in 1:r_θ
+                @inbounds init_ss[kθ, kI, z, b1] += wz * gamma_z_t1[kθ, kI, z, n]
+            end
+        end
+
+        # Transition periods
+        for t in 1:T-1
+            b = bin_map[n, t+1]
+            for z in 1:r_Z
+                @inbounds wz = w_z[z, n]
+                wz < 1e-15 && continue
+                for kθ1 in 1:r_θ, kI in 1:r_I, kI1 in 1:r_I
+                    @inbounds trans_ss[kI1, kI, kθ1, z, t, b] +=
+                        wz * ccp_xi_z[kI1, kI, kθ1, z, t, n]
+                end
+            end
+        end
+    end
+
+    return init_ss, trans_ss
+end
+
+"""
+    ccp_negll_v3_binned(vec, init_ss, trans_ss, bin_values,
+                         r_θ, r_I, r_P, r_ω, T; grids...)
+
+Binned CCP negative log-likelihood.  Loops over income bins instead of
+children — ~100x fewer iterations than the per-child version.
+ForwardDiff-compatible.
+"""
+function ccp_negll_v3_binned(vec::AbstractVector{Tv},
+                              init_ss::Array{Float64,4},     # (r_θ, r_I, r_Z, n_bins)
+                              trans_ss::Array{Float64,6},    # (r_I, r_I, r_θ, r_Z, T-1, n_bins)
+                              bin_values::Vector{Float64},
+                              r_θ::Int, r_I::Int, r_P::Int, r_ω::Int, Tp::Int;
+                              θ_grid::AbstractVector=1.0:r_θ,
+                              I_grid::AbstractVector=1.0:r_I,
+                              P_grid::AbstractVector=1.0:r_P,
+                              ω_grid::AbstractVector=1.0:r_ω) where Tv
+    nc = r_I - 1
+    c  = _unpack_cutpoints(vec[1:nc])
+    # β₂ (I_old) dropped — pack is [c_reparam, β₁, β₃, β₄, β₅]
+    β1, β3, β4, β5 = vec[nc+1], vec[nc+2], vec[nc+3], vec[nc+4]
+
+    n_total_bins = length(bin_values)
+    negll = zero(Tv)
+
+    for kω in 1:r_ω, kP in 1:r_P
+        z = (kP - 1) * r_ω + kω
+        rp = β3 * P_grid[kP] + β4 * ω_grid[kω]
+
+        for b in 1:n_total_bins
+            y_b = bin_values[b]
+            ip = β5 * y_b  # missing bin has y_b=0, so ip=0
+
+            # ── Initial CCP ──
+            for kθ in 1:r_θ
+                η = β1 * θ_grid[kθ] + rp + ip
+                for kI in 1:r_I
+                    @inbounds g = init_ss[kθ, kI, z, b]
+                    g < 1e-15 && continue
+                    negll -= g * _ordered_probit_logprob(c, η, kI, nc)
+                end
+            end
+
+            # ── Transition CCPs ──
+            for t in 1:Tp-1
+                for kθ1 in 1:r_θ
+                    η = β1 * θ_grid[kθ1] + rp + ip
+                    for kI in 1:r_I
+                        for kI1 in 1:r_I
+                            @inbounds ξv = trans_ss[kI1, kI, kθ1, z, t, b]
+                            ξv < 1e-15 && continue
+                            negll -= ξv * _ordered_probit_logprob(c, η, kI1, nc)
                         end
                     end
                 end
@@ -290,7 +561,7 @@ function initialize_ccp_v3(r_I::Int; rng::AbstractRNG=Random.default_rng())
     sort!(c)
     OrderedProbitCCPV3(c,
         0.1 + 0.02 * randn(rng),   # β₁ (θ')
-        0.1 + 0.02 * randn(rng),   # β₂ (I_old)
+        0.0,                         # β₂ (I_old) — fixed at zero
         0.02 * randn(rng),          # β₃ (θ^P)
         0.02 * randn(rng),          # β₄ (ω)
         0.0)                         # β₅ (log y) — start at zero
@@ -330,31 +601,52 @@ Closed-form WLS.  Weights from regime posteriors w_z[z, n].
 function update_income_model(w_z::Matrix{Float64}, Y_income::Matrix{Float64},
                                r_P::Int, r_ω::Int;
                                P_grid::AbstractVector=1.0:r_P,
-                               ω_grid::AbstractVector=1.0:r_ω)
+                               ω_grid::AbstractVector=1.0:r_ω,
+                               fix_betaω::Bool=false)
     N, Tp = size(Y_income)
-    XtWX = zeros(3, 3)
-    XtWy = zeros(3)
 
-    for n in 1:N, kω in 1:r_ω, kP in 1:r_P
-        z = (kP - 1) * r_ω + kω
-        wz = w_z[z, n]
-        wz < 1e-15 && continue
-        x1 = P_grid[kP]; x2 = ω_grid[kω]
-        for t in 1:Tp
-            y = Y_income[n, t]
-            isnan(y) && continue
-            # Accumulate X'WX and X'Wy for design row [1, x1, x2]
-            XtWX[1,1] += wz;       XtWX[1,2] += wz*x1;       XtWX[1,3] += wz*x2
-            XtWX[2,1] += wz*x1;    XtWX[2,2] += wz*x1*x1;    XtWX[2,3] += wz*x1*x2
-            XtWX[3,1] += wz*x2;    XtWX[3,2] += wz*x1*x2;    XtWX[3,3] += wz*x2*x2
-            XtWy[1] += wz*y;       XtWy[2] += wz*x1*y;        XtWy[3] += wz*x2*y
+    if fix_betaω
+        # Regress on [1, x1] only (no ω)
+        XtWX = zeros(2, 2)
+        XtWy = zeros(2)
+        for n in 1:N, kω in 1:r_ω, kP in 1:r_P
+            z = (kP - 1) * r_ω + kω
+            wz = w_z[z, n]
+            wz < 1e-15 && continue
+            x1 = P_grid[kP]
+            for t in 1:Tp
+                y = Y_income[n, t]
+                isnan(y) && continue
+                XtWX[1,1] += wz;    XtWX[1,2] += wz*x1
+                XtWX[2,1] += wz*x1; XtWX[2,2] += wz*x1*x1
+                XtWy[1] += wz*y;    XtWy[2] += wz*x1*y
+            end
         end
+        λ = 1e-8 * max(XtWX[1,1], 1.0)
+        for i in 1:2; XtWX[i,i] += λ; end
+        β2 = XtWX \ XtWy
+        β = [β2[1], β2[2], 0.0]
+    else
+        XtWX = zeros(3, 3)
+        XtWy = zeros(3)
+        for n in 1:N, kω in 1:r_ω, kP in 1:r_P
+            z = (kP - 1) * r_ω + kω
+            wz = w_z[z, n]
+            wz < 1e-15 && continue
+            x1 = P_grid[kP]; x2 = ω_grid[kω]
+            for t in 1:Tp
+                y = Y_income[n, t]
+                isnan(y) && continue
+                XtWX[1,1] += wz;       XtWX[1,2] += wz*x1;       XtWX[1,3] += wz*x2
+                XtWX[2,1] += wz*x1;    XtWX[2,2] += wz*x1*x1;    XtWX[2,3] += wz*x1*x2
+                XtWX[3,1] += wz*x2;    XtWX[3,2] += wz*x1*x2;    XtWX[3,3] += wz*x2*x2
+                XtWy[1] += wz*y;       XtWy[2] += wz*x1*y;        XtWy[3] += wz*x2*y
+            end
+        end
+        λ = 1e-8 * max(XtWX[1,1], 1.0)
+        for i in 1:3; XtWX[i,i] += λ; end
+        β = XtWX \ XtWy
     end
-
-    # Regularise and solve
-    λ = 1e-8 * max(XtWX[1,1], 1.0)
-    for i in 1:3; XtWX[i,i] += λ; end
-    β = XtWX \ XtWy
 
     # Residual variance
     ssr = 0.0; w_total = 0.0
@@ -388,4 +680,156 @@ function initialize_income_model(Y_income::Matrix{Float64})
     m = sum(obs) / length(obs)
     s = sqrt(max(sum((obs .- m).^2) / length(obs), 1e-6))
     return IncomeModel(m, 0.0, 0.0, log(s))
+end
+
+# ─────────────────────────────────────────────────────────────────
+# AdultOutcomeEmission — ordered probit for adult outcomes of (θ_T, ω)
+# ─────────────────────────────────────────────────────────────────
+
+"""
+    AdultOutcomeEmission
+
+Ordered probit emission for adult outcomes that depend on both final-period
+child skill θ_T and child heterogeneity ω:
+
+    P(x ≤ k | θ_T = j, ω = v) = Φ(τ_k - α_θ·j - α_ω·v)
+
+Each of the M adult measures has its own cutpoints τ[m], loading α_θ[m], α_ω[m].
+"""
+struct AdultOutcomeEmission
+    tau::Vector{Vector{Float64}}   # cutpoints per measure (length(tau[m]) = κ_m - 1)
+    alpha_theta::Vector{Float64}   # loading on θ_T per measure
+    alpha_omega::Vector{Float64}   # loading on ω per measure
+end
+
+"""
+    adult_outcome_matrix(tau_m, alpha_theta_m, alpha_omega_m, r_θ, r_ω, κ_m;
+                          θ_grid, ω_grid) -> Array{T,3}
+
+Build emission probabilities P(x=k | θ_T=j, ω=v). Size (κ_m, r_θ, r_ω).
+ForwardDiff-compatible.
+"""
+function adult_outcome_matrix(tau_m::AbstractVector{Tt}, alpha_theta_m::Ta, alpha_omega_m::Tb,
+                               r_θ::Int, r_ω::Int, κ_m::Int;
+                               θ_grid::AbstractVector=1.0:r_θ,
+                               ω_grid::AbstractVector=1.0:r_ω) where {Tt, Ta, Tb}
+    RT = promote_type(Tt, Ta, Tb, Float64)
+    P = zeros(RT, κ_m, r_θ, r_ω)
+    for v in 1:r_ω, j in 1:r_θ
+        η = alpha_theta_m * θ_grid[j] + alpha_omega_m * ω_grid[v]
+        F_prev = zero(RT)
+        for k in 1:κ_m-1
+            F_curr = Φ(tau_m[k] - η)
+            P[k, j, v] = max(F_curr - F_prev, RT(1e-12))
+            F_prev = F_curr
+        end
+        P[κ_m, j, v] = max(one(RT) - F_prev, RT(1e-12))
+        # Renormalize for safety
+        s = zero(RT)
+        for k in 1:κ_m; s += P[k, j, v]; end
+        for k in 1:κ_m; P[k, j, v] /= s; end
+    end
+    return P
+end
+
+"""
+Build all adult outcome emission matrices (one 3D array per measure).
+"""
+function build_adult_matrices(ae::AdultOutcomeEmission, κ_adult::Vector{Int},
+                               r_θ::Int, r_ω::Int;
+                               θ_grid::AbstractVector=1.0:r_θ,
+                               ω_grid::AbstractVector=1.0:r_ω)
+    M = length(κ_adult)
+    [adult_outcome_matrix(ae.tau[m], ae.alpha_theta[m], ae.alpha_omega[m],
+                           r_θ, r_ω, κ_adult[m]; θ_grid, ω_grid) for m in 1:M]
+end
+
+"""
+    pack_adult_emission(ae::AdultOutcomeEmission) -> Vector{Float64}
+
+Pack into a single vector for optimization: for each measure m,
+[cutpoint_reparam(κ_m-1), alpha_theta_m, alpha_omega_m].
+"""
+function pack_adult_emission(ae::AdultOutcomeEmission)
+    v = Float64[]
+    for m in eachindex(ae.tau)
+        append!(v, _pack_cutpoints(ae.tau[m]))
+        push!(v, ae.alpha_theta[m])
+        push!(v, ae.alpha_omega[m])
+    end
+    return v
+end
+
+"""
+    unpack_adult_emission(v, κ_adult) -> AdultOutcomeEmission
+"""
+function unpack_adult_emission(v::AbstractVector, κ_adult::Vector{Int})
+    M = length(κ_adult)
+    tau = Vector{Vector{Float64}}(undef, M)
+    alpha_theta = Vector{Float64}(undef, M)
+    alpha_omega = Vector{Float64}(undef, M)
+    idx = 1
+    for m in 1:M
+        nc = κ_adult[m] - 1
+        tau[m] = _unpack_cutpoints(v[idx:idx+nc-1])
+        idx += nc
+        alpha_theta[m] = v[idx]; idx += 1
+        alpha_omega[m] = v[idx]; idx += 1
+    end
+    return AdultOutcomeEmission(tau, alpha_theta, alpha_omega)
+end
+
+"""
+    initialize_adult_outcome_emission(κ_adult, r_θ, r_ω; rng) -> AdultOutcomeEmission
+
+Initialize with equally spaced cutpoints and small positive loadings.
+"""
+function initialize_adult_outcome_emission(κ_adult::Vector{Int}, r_θ::Int, r_ω::Int;
+                                            rng::AbstractRNG=Random.default_rng())
+    M = length(κ_adult)
+    tau = Vector{Vector{Float64}}(undef, M)
+    alpha_theta = Vector{Float64}(undef, M)
+    alpha_omega = Vector{Float64}(undef, M)
+    for m in 1:M
+        nc = κ_adult[m] - 1
+        if nc == 1
+            tau[m] = [0.0 + 0.1 * randn(rng)]
+        else
+            tau[m] = collect(range(-1.5, 1.5; length=nc)) .+ 0.05 .* randn(rng, nc)
+        end
+        alpha_theta[m] = 0.3 + 0.1 * abs(randn(rng))
+        alpha_omega[m] = 0.3 + 0.1 * abs(randn(rng))
+    end
+    return AdultOutcomeEmission(tau, alpha_theta, alpha_omega)
+end
+
+"""
+    adult_emission_negll(vec, SS_adult, κ_adult, r_θ, r_ω; θ_grid, ω_grid) -> negll
+
+Negative log-likelihood for adult outcome emissions given sufficient statistics.
+SS_adult[m] is a (κ_m, r_θ, r_ω) array of weighted counts.
+"""
+function adult_emission_negll(vec::AbstractVector{T}, SS_adult::Vector{Array{Float64,3}},
+                               κ_adult::Vector{Int}, r_θ::Int, r_ω::Int;
+                               θ_grid::AbstractVector=1.0:r_θ,
+                               ω_grid::AbstractVector=1.0:r_ω) where T
+    M = length(κ_adult)
+    negll = zero(T)
+    idx = 1
+    for m in 1:M
+        nc = κ_adult[m] - 1
+        tau_m = _unpack_cutpoints(vec[idx:idx+nc-1])
+        idx += nc
+        alpha_theta_m = vec[idx]; idx += 1
+        alpha_omega_m = vec[idx]; idx += 1
+        Pm = adult_outcome_matrix(tau_m, alpha_theta_m, alpha_omega_m,
+                                   r_θ, r_ω, κ_adult[m]; θ_grid, ω_grid)
+        for v in 1:r_ω, j in 1:r_θ, k in 1:κ_adult[m]
+            w = SS_adult[m][k, j, v]
+            if w > 1e-15
+                negll -= w * log(max(Pm[k, j, v], T(1e-15)))
+            end
+        end
+    end
+    return negll
 end
