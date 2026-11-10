@@ -12,7 +12,6 @@
 #   welfare_investment.csv          (Table: investment reallocation)
 #   welfare_income.csv              (Table: income reallocation)
 #   ccp_income_semielasticity.csv   (β5/δ point estimate)
-#   ../counterfactuals/cf_income_piecewise_10k_table.txt  (transfer table)
 #
 # Usage:  bash scripts/generate_paper_figures.sh
 # ============================================================================
@@ -31,8 +30,8 @@ julia --project=. scripts/counterfactual_2period.jl
 echo "▶  income reallocation (figures + welfare_income.csv)"
 julia --project=. scripts/counterfactual_income_transfers.jl
 
-echo "▶  piecewise \$10k transfers (figure + transfer table + β5/δ)"
-julia --project=. scripts/counterfactual_income_piecewise_10k.jl
+echo "▶  β5/δ point estimate + bootstrap SE (ccp_income_semielasticity.csv)"
+julia --project=. scripts/ccp_income_semielasticity.jl
 
 echo "▶  ordinal-complementarity tests by cutpoint (Table 2: supermodularity_by_cutpoint.csv)"
 julia --project=. scripts/test_supermodularity_by_cutpoint.jl
