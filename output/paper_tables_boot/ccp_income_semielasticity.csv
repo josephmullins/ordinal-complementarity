@@ -1,0 +1,6 @@
+quantity,value
+beta5,1.3166657464446936
+delta,0.424049653480672
+beta5_over_delta,3.1049801258821375
+beta5_over_delta_boot_se,0.27922927887581567
+boot_B_ok,200

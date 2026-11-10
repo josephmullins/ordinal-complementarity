@@ -1,0 +1,29 @@
+\begin{table}[htbp]
+\centering\small
+\begin{tabular}{@{}llcccccccc@{}}
+\toprule
+ & & \multicolumn{3}{c}{MMM (least favorable)} & \multicolumn{2}{c}{MMM (RSW)} & \multicolumn{3}{c}{Fang--Seo projection} \\
+\cmidrule(lr){3-5}\cmidrule(lr){6-7}\cmidrule(lr){8-10}
+Transition group & $H_0$ & $\hat T_{\mathrm{MMM}}$ & $c^{\mathrm{LF}}_{0.05}$ & rej. & $c^{\mathrm{RSW}}_{0.05}$ & rej. & $\hat T_{\mathrm{FS}}$ & $\hat c_{0.05}$ \,($p$) & rej. \\ \midrule
+ages 0--5 & complementarity & $24.0$ & $43.3$ & no & $44.1$\,[2] & no & $12.6$ & $12.4$ (0.04) & yes \\
+ & substitutability & $51.5$ & $43.3$ & yes & $44.8$\,[0] & yes & $18.9$ & $12.7$ (0.01) & yes \\
+\midrule
+ages 6--13 & complementarity & $99.9$ & $38.5$ & yes & $39.4$\,[0] & yes & $30.2$ & $36.9$ (0.07) & no \\
+ & substitutability & $20.8$ & $38.5$ & no & $39.4$\,[0] & no & $4.4$ & $18.8$ (0.93) & no \\
+\bottomrule
+\end{tabular}
+\caption{Ordinal complementarity ($H_0$: supermodularity in distribution) and substitutability ($H_0$: submodularity) of the technology $\overline\Pi(\theta'\mid\theta,I)$, by transition group, on the pooled adjacent constraint set of Table~\ref{tab:test}: least-favorable, moment-selection, and projection critical values. $\hat T_{\mathrm{MMM}}$ is the modified-method-of-moments statistic of
+Section~\ref{subsec:test-oc} on the 36 adjacent survival cross-differences
+(child-bootstrap covariance, $B=200$), with critical values $c^{\mathrm{LF}}_{0.05}$
+simulated from the least-favorable null and $c^{\mathrm{RSW}}_{0.05}$ from the
+moment-selection refinement of \citet{Romano_Shaikh_Wolf-2014-ECTA} with first-stage size
+$\beta=\alpha/10$; the bracketed number is how many of the inequalities the first step
+classifies as slack. Because the second step uses the $(1-\alpha+\beta)$-quantile,
+$c^{\mathrm{RSW}}_{0.05}$ can exceed $c^{\mathrm{LF}}_{0.05}$ when few inequalities are
+slack. $\hat T_{\mathrm{FS}}$ is the projection statistic of
+\citet{Fang_Seo-2021-ECTA} described in Section~\ref{subsec:test-fs}, with critical value
+$\hat c_{0.05}$ and bootstrap $p$-value computed from the same $B=200$ child-bootstrap
+draws and tuning $\gamma_n=0.01/\log N$, $c_n=1$ (verdicts are unchanged for
+$\gamma_n\in\{1/N,\,0.01,\,0.1\}$). Rejection is evidence against the named property.}
+\label{tab:test_comparison}
+\end{table}
