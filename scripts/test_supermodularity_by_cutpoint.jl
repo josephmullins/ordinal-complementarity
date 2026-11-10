@@ -64,7 +64,7 @@ const PANEL_INVEST_ITEMS_NB = [
 ]
 
 const REG_RUN  = get(ENV, "REG_RUN", "0") == "1"
-const FIT_PATH = get(ENV, "FIT_OVERRIDE", joinpath(REPO, "output", "estimation_v3_eps.jld2"))
+const FIT_PATH = get(ENV, "FIT_OVERRIDE", joinpath(REPO, "output", "estimation_v3_eps_reg.jld2"))
 println("Loading fit: ", FIT_PATH, " ...")
 fit = load(FIT_PATH)
 pv3 = fit["params_v3_eps"]; psk = fit["params_skill"]; dims = fit["data_dims"]
