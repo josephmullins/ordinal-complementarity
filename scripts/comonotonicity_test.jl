@@ -522,8 +522,60 @@ function run_databoot(; bootfile = get(ENV, "COMONO_BOOT",
     println("\nSaved → ", csvpath)
 end
 
+# ---------------------------------------------------------------------
+# NUMERICAL DELTA METHOD (Hong & Li 2018) on the same data-bootstrap draws.
+# t^± is the value of a matrix game in the gap matrix D (linear in Π̄), so we
+# perturb D̂ by ε√N (D*_b − D̂) and re-solve the LP.  Reports steps
+# N^{-1/3} (baseline), N^{-1/4} (sensitivity), N^{-1/2} (= standard bootstrap).
+# Writes paper_tables_boot/comonotonicity_test_ndm[_induced].csv.
+include(joinpath(SRC, "numerical_delta.jl"))
+
+function run_ndm(; bootfile = get(ENV, "COMONO_BOOT",
+                     joinpath(@__DIR__, "..", "output", "bootstrap_reg.jld2")),
+                 induced::Bool = get(ENV, "INDUCED", "0") == "1", α = 0.05,
+                 N = parse(Int, get(ENV, "NDM_N", "9686")))
+    obj = induced ? "INDUCED Π(θ'|θ,income)" : "technology Π̄(θ'|θ,I)"
+    println("="^72); println("NUMERICAL-DELTA rationalizability test — $obj  (N=$N, $bootfile)"); println("="^72)
+    bc = load(bootfile)
+    okrows = findall(bc["ok"]); r_θ = bc["r_θ"]; TG = bc["transition_groups"]
+    if induced
+        boot_pibar = bc["boot_pibar_ind"]; pibar0 = bc["pibar_ind0"]; r_I = bc["n_y"]
+    else
+        boot_pibar = bc["boot_pibar"]; pibar0 = bc["pibar0"]; r_I = bc["r_I"]
+    end
+    gapD(v) = gap_matrices(reconstruct_Pi(v, r_θ, r_I)[1])[2]
+    steps = ((:e13, 1/3), (:e14, 1/4), (:naive, 1/2))
+    rows = ["group,ages,direction,shape,t_hat,rt_hat,step,eps,crit,reject,ci_lo,ci_hi,B"]
+    ages_list = ["0-5", "6-13"]
+    for (g, _) in enumerate(TG)
+        D̂ = gapD(pibar0[g])
+        Dboot = [gapD(boot_pibar[g][b, :]) for b in okrows]
+        println("\nGROUP $g (ages $(ages_list[g]))  B=$(length(Dboot))")
+        for sense in (:max, :min), shape in (:none, :convex, :concave)
+            φ = M -> solve_shape_lp(M; sense, shape)[1]
+            t̂ = φ(D̂)
+            dirlab = sense === :max ? "comonotone" : "counter"
+            for (lab, e) in steps
+                ε = N^(-e)
+                D = ndm_draws(φ, D̂, Dboot, N; ε)
+                r = ndm_test(t̂, D, N; α, sense)
+                @printf("  %-10s %-8s %-6s t̂=%+.5f √N t̂=%+7.3f crit=%+7.3f  %s  CI[%+.5f,%+.5f]\n",
+                        dirlab, shape, lab, t̂, r.rt, r.c, r.reject ? "REJECT" : "  -   ", r.ci...)
+                push!(rows, @sprintf("%d,%s,%s,%s,%.6f,%.4f,%s,%.5f,%.4f,%s,%.6f,%.6f,%d",
+                      g, ages_list[g], dirlab, shape, t̂, r.rt, lab, ε, r.c, r.reject, r.ci..., length(D)))
+            end
+        end
+    end
+    tabdir = joinpath(@__DIR__, "..", "output", "paper_tables_boot"); isdir(tabdir) || mkpath(tabdir)
+    csvpath = joinpath(tabdir, induced ? "comonotonicity_test_ndm_induced.csv" : "comonotonicity_test_ndm.csv")
+    open(csvpath, "w") do io; foreach(r -> println(io, r), rows); end
+    println("\nSaved → ", csvpath)
+end
+
 let
     mode = get(ENV, "COMONO_MODE", "all")
+    (mode == "ndm") && run_ndm()
+    (mode == "ndm_induced") && run_ndm(; induced = true)
     (mode in ("all", "val")) && run_validation()
     (mode in ("all", "real")) && run_real(; B = parse(Int, get(ENV, "COMONO_B", "2000")))
     (mode == "databoot") && run_databoot()

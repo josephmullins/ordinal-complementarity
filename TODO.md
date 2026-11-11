@@ -18,6 +18,10 @@ and its B=200 child bootstrap (`output/bootstrap_reg.jld2`).
     (`estimation_v3_eps.jld2`). Add fully cold starts.
   - **Change `reg_multistart.jl`'s output path first** — it writes to
     `estimation_v3_eps_reg.jld2` and would overwrite the paper fit.
+- Check flatness in investment across optima: in the reg fit (seed 1009) the
+  ages 0–5 technology is flat for I ≥ 3 (max |ΔΠ̄| ≤ 6e-4; `scripts/_pibar_flat_in_I.jl`),
+  which pins 6 of 12 cross-differences at 0 and forces t̂⁺ ≤ 0 ≤ t̂⁻. The MLE is not
+  flat (max |ΔΠ̄| 0.07–0.17; `scripts/_pibar_flat_mle.jl`). Compare across the top optima.
 - If the fit changes: redo the bootstrap (`scripts/bootstrap_reg.jl`) and everything downstream.
 
 ## 2. Numerical bootstrap for the rationalizability tests
