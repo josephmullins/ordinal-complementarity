@@ -44,7 +44,11 @@ compute:
 
 Transitions are shared across ε_Y, so these are indexed by (g, z_trans).
 """
-function precompute_J_Pi_z_eps(trans_specs::Vector{RobitNNTransitionV3},
+# (parameter group g, Jacobian block j, periods) for the transition score loop. Default: one
+# Jacobian per group. Specs whose technology varies within a group (ordrobit_age.jl) override.
+_trans_score_blocks(trans_specs, transition_groups) = [(g, g, grp) for (g, grp) in enumerate(transition_groups)]
+
+function precompute_J_Pi_z_eps(trans_specs::AbstractVector,
                                 transition_groups::Vector{Vector{Int}},
                                 r_θ::Int, r_I::Int, r_P::Int, r_ω::Int;
                                 θ_grid::AbstractVector=1.0:r_θ,
@@ -58,21 +62,15 @@ function precompute_J_Pi_z_eps(trans_specs::Vector{RobitNNTransitionV3},
 
     for (g, _) in enumerate(transition_groups)
         spec = trans_specs[g]
-        φ_g = pack_robit_nn_v3(spec)
-        K = spec.K; ν = spec.ν
+        φ_g = _pack_spec(spec)
+        build = _make_build_fn(spec, r_θ, r_I; θ_grid, I_grid)
         J_list[g] = Vector{Matrix{Float64}}(undef, r_Z_trans)
         Π_list[g] = Vector{Array{Float64,3}}(undef, r_Z_trans)
 
         for kω in 1:r_ω, kP in 1:r_P
             z = regime_z(kP, kω, r_ω)
-            Π_z = _build_robit_nn_v3_pi(φ_g, r_θ, r_I, K, ν,
-                                          P_grid[kP], ω_grid[kω];
-                                          θ_grid, I_grid)
-            J_z = ForwardDiff.jacobian(
-                φ -> vec(_build_robit_nn_v3_pi(φ, r_θ, r_I, K, ν,
-                                                  P_grid[kP], ω_grid[kω];
-                                                  θ_grid, I_grid)),
-                φ_g)
+            Π_z = build(φ_g, P_grid[kP], ω_grid[kω])
+            J_z = ForwardDiff.jacobian(φ -> vec(build(φ, P_grid[kP], ω_grid[kω])), φ_g)
             J_list[g][z] = J_z
             Π_list[g][z] = Π_z
         end
@@ -785,7 +783,7 @@ function per_child_scores_v3_eps(params_v3_eps, params_skill, data;
 
     # Score storage per block (n_φ_block × N)
     n_groups = length(transition_groups)
-    n_φ_g = length(pack_robit_nn_v3(trans_specs[1]))
+    n_φ_g = length(_pack_spec(trans_specs[1]))
     n_φ_ccp = length(pack_ccp_v3_eps(ccp_spec))
     n_φ_inc = 5
     n_φ_π_Pω = r_P * r_ω - 1
@@ -900,10 +898,10 @@ function per_child_scores_v3_eps(params_v3_eps, params_skill, data;
         end
 
         # ── Transition scores ──
-        for (g, group) in enumerate(transition_groups)
+        for (g, j, group) in _trans_score_blocks(trans_specs, transition_groups)
             s_view = @view s_trans_g[g][:, n]
             _score_trans_contrib!(s_view, w_vec, ξ_z_all,
-                                   J_Π_z[g], Π_z_list[g], group,
+                                   J_Π_z[j], Π_z_list[j], group,
                                    r_P, r_ω, r_Y, r_θ, r_I)
         end
 
@@ -1244,8 +1242,8 @@ function delta_cov_survivor_bar(inf_result, params_v3_eps, params_skill;
 
     for (g, _) in enumerate(transition_groups)
         spec_g = trans_specs[g]
-        K = spec_g.K; ν = spec_g.ν
-        φ_g_hat = pack_robit_nn_v3(spec_g)
+        build = _make_build_fn(spec_g, r_θ, r_I; θ_grid, I_grid)
+        φ_g_hat = _pack_spec(spec_g)
         n_φ_g = length(φ_g_hat)
         n_α = length(α_Pω_hat)
 
@@ -1262,9 +1260,7 @@ function delta_cov_survivor_bar(inf_result, params_v3_eps, params_skill;
             Π_bar = zeros(TE, r_θ, r_θ, r_I)
             for kω in 1:r_ω, kP in 1:r_P
                 w = π[(kP - 1) * r_ω + kω]
-                Π_z = _build_robit_nn_v3_pi(φ_g, r_θ, r_I, K, ν,
-                                              P_grid[kP], ω_grid[kω];
-                                              θ_grid, I_grid)
+                Π_z = build(φ_g, P_grid[kP], ω_grid[kω])
                 Π_bar .+= w .* Π_z
             end
             # Survivor free entries: S(k|θ,I) for k=1..n_cut
@@ -1330,8 +1326,8 @@ function delta_cov_Pi_bar_free(inf_result, params_v3_eps, params_skill;
 
     for (g, group) in enumerate(transition_groups)
         spec_g = trans_specs[g]
-        K = spec_g.K; ν = spec_g.ν
-        φ_g_hat = pack_robit_nn_v3(spec_g)
+        build = _make_build_fn(spec_g, r_θ, r_I; θ_grid, I_grid)
+        φ_g_hat = _pack_spec(spec_g)
         n_φ_g = length(φ_g_hat)
         θ_combined = vcat(φ_g_hat, α_Pω_hat)
 
@@ -1343,9 +1339,7 @@ function delta_cov_Pi_bar_free(inf_result, params_v3_eps, params_skill;
             Π_bar = zeros(TE, r_θ, r_θ, r_I)
             for kω in 1:r_ω, kP in 1:r_P
                 w = π[(kP - 1) * r_ω + kω]
-                Π_z = _build_robit_nn_v3_pi(φ_g, r_θ, r_I, K, ν,
-                                              P_grid[kP], ω_grid[kω];
-                                              θ_grid, I_grid)
+                Π_z = build(φ_g, P_grid[kP], ω_grid[kω])
                 Π_bar .+= w .* Π_z
             end
             v = Vector{TE}(undef, n_free)
@@ -1368,8 +1362,7 @@ function delta_cov_Pi_bar_free(inf_result, params_v3_eps, params_skill;
         Π_bar_full = zeros(r_θ, r_θ, r_I)
         for kω in 1:r_ω, kP in 1:r_P
             w = π_Pω_flat[(kP - 1) * r_ω + kω]
-            Π_z = _build_robit_nn_v3_pi(φ_g_hat, r_θ, r_I, K, ν,
-                                          P_grid[kP], ω_grid[kω]; θ_grid, I_grid)
+            Π_z = build(φ_g_hat, P_grid[kP], ω_grid[kω])
             Π_bar_full .+= w .* Π_z
         end
 

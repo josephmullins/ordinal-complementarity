@@ -1,0 +1,13 @@
+group,ages,direction,shape,t_hat,ci_lo,ci_hi,boot_sd,p_achieve,boundary,convex_super_flag,concave_sub_flag
+1,0-5,comonotone,none,0.005224,-0.014886,0.007527,0.005346,0.6160,0.9772,false,false
+1,0-5,comonotone,convex,0.005224,-0.014886,0.007527,0.005346,0.6160,0.9772,false,false
+1,0-5,comonotone,concave,-0.022284,-0.060871,-0.006347,0.013816,0.0000,-1.6129,false,false
+1,0-5,counter,none,0.044457,0.004385,0.098679,0.024998,0.0100,1.7785,false,false
+1,0-5,counter,convex,0.099426,0.044552,0.137588,0.024301,0.0000,4.0914,false,false
+1,0-5,counter,concave,0.044457,0.004385,0.098679,0.025203,0.0100,1.7640,false,false
+2,6-13,comonotone,none,0.003672,-0.004830,0.004570,0.002331,0.8540,1.5748,false,false
+2,6-13,comonotone,convex,0.003672,-0.004971,0.004570,0.002383,0.8540,1.5408,false,false
+2,6-13,comonotone,concave,-0.009823,-0.028926,-0.000915,0.007740,0.0040,-1.2691,false,false
+2,6-13,counter,none,-0.001946,-0.002651,0.004037,0.001727,0.9360,-1.1264,false,false
+2,6-13,counter,convex,0.019688,0.005944,0.040064,0.009182,0.0000,2.1443,false,false
+2,6-13,counter,concave,-0.001946,-0.002588,0.004252,0.001801,0.9360,-1.0802,false,false

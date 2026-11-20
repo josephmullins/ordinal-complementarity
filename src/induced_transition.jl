@@ -76,14 +76,14 @@ function induced_transition_income(trans_spec, ccp_spec, income_model,
     c_ccp = Vector{Float64}(ccp_spec.c)
     β1, β3, β4, β5 = ccp_spec.beta1, ccp_spec.beta3, ccp_spec.beta4, ccp_spec.beta5
 
-    v_pi = pack_robit_nn_v3(trans_spec)
-    K, ν = trans_spec.K, trans_spec.ν
+    v_pi = _pack_spec(trans_spec)                       # any technology spec type
+    build = _make_build_fn(trans_spec, r_θ, r_I)
 
     Π_ind = zeros(r_θ, r_θ, n_y)
     for kP in 1:r_P, kω in 1:r_ω
         w_z = π_Pω[kP, kω]
         w_z < 1e-15 && continue
-        Π_z = _build_robit_nn_v3_pi(v_pi, r_θ, r_I, K, ν, float(kP), float(kω))  # [θ',θ,I]
+        Π_z = build(v_pi, float(kP), float(kω))           # [θ',θ,I]
         for (iy, y) in enumerate(y_levels)
             ε_eff = (log(y) - β0 - βP * kP - βω * kω) / δ
             regime_part = β3 * kP + β4 * kω + β5 * ε_eff

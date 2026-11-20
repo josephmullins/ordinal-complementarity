@@ -1,0 +1,57 @@
+object,group,side,Q,n_right_sign_est,n_sig_unadj,n_sig_bonf,min_abs_z,pass_unadj,pass_bonf,in_sample
+technology,1,supermodular,(0,1,1,1),2,1,0,-3.668,false,false,false
+technology,1,supermodular,(0,0,1,1),7,2,2,-0.565,false,false,false
+technology,1,supermodular,(0,0,0,1),9,6,4,0.866,false,false,false
+technology,1,supermodular,linear,5,3,3,-1.185,false,false,false
+technology,1,supermodular,(0,½,1,1),3,2,1,-1.718,false,false,false
+technology,1,supermodular,(0,0,½,1),8,3,3,-0.135,false,false,false
+technology,1,supermodular,Q̂ in-sample,9,6,4,0.829,false,false,true
+technology,1,submodular,(0,1,1,1),7,3,2,-1.927,false,false,false
+technology,1,submodular,(0,0,1,1),2,0,0,-4.349,false,false,false
+technology,1,submodular,(0,0,0,1),0,0,0,-7.075,false,false,false
+technology,1,submodular,linear,4,0,0,-4.055,false,false,false
+technology,1,submodular,(0,½,1,1),6,1,0,-3.126,false,false,false
+technology,1,submodular,(0,0,½,1),1,0,0,-5.935,false,false,false
+technology,1,submodular,Q̂ in-sample,6,3,0,-4.212,false,false,true
+technology,2,supermodular,(0,1,1,1),0,0,0,-3.562,false,false,false
+technology,2,supermodular,(0,0,1,1),4,3,1,-3.705,false,false,false
+technology,2,supermodular,(0,0,0,1),9,9,8,2.122,true,false,false
+technology,2,supermodular,linear,6,2,0,-0.927,false,false,false
+technology,2,supermodular,(0,½,1,1),0,0,0,-3.709,false,false,false
+technology,2,supermodular,(0,0,½,1),9,5,1,0.700,false,false,false
+technology,2,supermodular,Q̂ in-sample,9,6,2,1.255,false,false,true
+technology,2,submodular,(0,1,1,1),9,9,4,2.069,true,false,false
+technology,2,submodular,(0,0,1,1),5,3,3,-2.696,false,false,false
+technology,2,submodular,(0,0,0,1),0,0,0,-4.202,false,false,false
+technology,2,submodular,linear,3,0,0,-1.969,false,false,false
+technology,2,submodular,(0,½,1,1),9,3,3,0.533,false,false,false
+technology,2,submodular,(0,0,½,1),0,0,0,-2.703,false,false,false
+technology,2,submodular,Q̂ in-sample,9,3,3,1.011,false,false,true
+induced,1,supermodular,(0,1,1,1),4,1,0,-4.026,false,false,false
+induced,1,supermodular,(0,0,1,1),8,3,2,-1.070,false,false,false
+induced,1,supermodular,(0,0,0,1),12,6,4,0.676,false,false,false
+induced,1,supermodular,linear,6,4,4,-1.573,false,false,false
+induced,1,supermodular,(0,½,1,1),4,2,2,-2.232,false,false,false
+induced,1,supermodular,(0,0,½,1),10,4,4,-0.477,false,false,false
+induced,1,supermodular,Q̂ in-sample,12,6,4,0.676,false,false,true
+induced,1,submodular,(0,1,1,1),8,4,3,-1.664,false,false,false
+induced,1,submodular,(0,0,1,1),4,0,0,-3.515,false,false,false
+induced,1,submodular,(0,0,0,1),0,0,0,-7.834,false,false,false
+induced,1,submodular,linear,6,0,0,-3.891,false,false,false
+induced,1,submodular,(0,½,1,1),8,2,0,-2.713,false,false,false
+induced,1,submodular,(0,0,½,1),2,0,0,-4.993,false,false,false
+induced,1,submodular,Q̂ in-sample,8,4,3,-1.664,false,false,true
+induced,2,supermodular,(0,1,1,1),0,0,0,-3.200,false,false,false
+induced,2,supermodular,(0,0,1,1),5,4,2,-3.435,false,false,false
+induced,2,supermodular,(0,0,0,1),12,11,9,1.187,false,false,false
+induced,2,supermodular,linear,6,2,0,-1.287,false,false,false
+induced,2,supermodular,(0,½,1,1),1,0,0,-3.433,false,false,false
+induced,2,supermodular,(0,0,½,1),12,7,2,0.031,false,false,false
+induced,2,supermodular,Q̂ in-sample,12,9,4,0.826,false,false,true
+induced,2,submodular,(0,1,1,1),12,11,8,1.386,false,false,false
+induced,2,submodular,(0,0,1,1),7,5,4,-2.533,false,false,false
+induced,2,submodular,(0,0,0,1),0,0,0,-3.663,false,false,false
+induced,2,submodular,linear,6,0,0,-2.178,false,false,false
+induced,2,submodular,(0,½,1,1),11,5,4,-0.040,false,false,false
+induced,2,submodular,(0,0,½,1),0,0,0,-2.537,false,false,false
+induced,2,submodular,Q̂ in-sample,12,6,4,0.358,false,false,true

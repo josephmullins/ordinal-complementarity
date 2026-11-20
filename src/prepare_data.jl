@@ -877,6 +877,80 @@ function _encode_continuous_panel(kids, N, df_period, idx, col, cutoffs_vec)
     return vals, n_bins
 end
 
+# k quantile bins computed within the period, over the panel children's observed values
+# (ties merge cuts; empty bins are dropped by relabeling)
+function _encode_continuous_panel_q(kids, N, df_period, idx, col, k)
+    raw = fill(NaN, N)
+    for (n, kid) in enumerate(kids)
+        row = get(idx, kid, nothing)
+        row === nothing && continue
+        v = df_period[row, col]
+        ismissing(v) || (raw[n] = Float64(v))
+    end
+    obs = findall(!isnan, raw)
+    isempty(obs) && return zeros(Int, N), 1
+    cuts = unique(quantile(raw[obs], range(1/k, 1 - 1/k; length = k - 1)))
+    vals = zeros(Int, N)
+    for n in obs; vals[n] = searchsortedfirst(cuts, raw[n]); end
+    compress_categories(vals)
+end
+
+"""
+k quantile bins formed within each single year of age at assessment (AGE) inside the
+period, so a child's bin is its rank among children tested at the same age.  Ages with
+fewer than `min_age_obs` observations use the period-pooled cutoffs instead.
+"""
+function _encode_continuous_panel_qage(kids, N, df_period, idx, col, k; min_age_obs::Int = 50)
+    raw = fill(NaN, N); age = zeros(Int, N)
+    for (n, kid) in enumerate(kids)
+        row = get(idx, kid, nothing)
+        row === nothing && continue
+        v = df_period[row, col]
+        ismissing(v) && continue
+        raw[n] = Float64(v); age[n] = Int(df_period[row, :AGE])
+    end
+    obs = findall(!isnan, raw)
+    isempty(obs) && return zeros(Int, N), 1
+    qcuts(x) = unique(quantile(x, range(1/k, 1 - 1/k; length = k - 1)))
+    pooled = qcuts(raw[obs])
+    vals = zeros(Int, N)
+    for a in unique(age[obs])
+        ia = filter(n -> age[n] == a, obs)
+        cuts = length(ia) >= min_age_obs ? qcuts(raw[ia]) : pooled
+        for n in ia; vals[n] = searchsortedfirst(cuts, raw[n]); end
+    end
+    compress_categories(vals)
+end
+
+"""Relabel an ordinal measure (0 = missing) so that its categories are 1..κ with none empty."""
+function compress_categories(x::Vector{Int})
+    used = sort(unique(x[x .> 0])); map_ = Dict(c => i for (i, c) in enumerate(used))
+    [v > 0 ? map_[v] : 0 for v in x], max(length(used), 1)
+end
+
+"""
+    merge_sparse_tails(x; min_share = 0.01) -> (x, κ)
+
+Drop empty categories, then merge a TAIL category holding < min_share of the observed
+values into its neighbour, repeatedly, from both ends (never below 2 categories).
+"""
+function merge_sparse_tails(x::Vector{Int}; min_share::Float64 = 0.01)
+    y, κ = compress_categories(x)
+    nobs = count(>(0), y)
+    while κ > 2
+        cnt = [count(==(c), y) for c in 1:κ]
+        if cnt[1] < min_share * nobs
+            y = [v > 1 ? v - 1 : v for v in y]            # 1 → 1, 2 → 1, 3 → 2, ...
+        elseif cnt[κ] < min_share * nobs
+            y = [v == κ ? κ - 1 : v for v in y]
+        else
+            break
+        end
+        κ -= 1
+    end
+    y, κ
+end
+
 function _encode_invest_items_panel(kids, N, invest_items, home_df, home_idx;
                                      n_bins_count::Int=4, min_obs::Int=30)
     X_I = Vector{Vector{Int}}()
@@ -1073,6 +1147,8 @@ function prepare_panel_data(datasets;
     min_obs::Int = 30,
     n_bins_count::Int = 4,
     exclude_sources::Vector{Vector{Symbol}} = [Symbol[] for _ in age_ranges],
+    cont_bins_per_period::Int = 0,   # 0 = pooled cutoffs (paper); k > 0 = k quantile bins within each period
+    cont_bins_by_age::Bool = false,  # with k > 0: form the k bins within each single year of age at test
 )
     (; df_msd, df_ppvt, df_piat, df_digit, df_home, df_parent, df_income, cutoffs) = datasets
     df_adult = haskey(datasets, :df_adult) ? datasets.df_adult : nothing
@@ -1191,8 +1267,11 @@ function prepare_panel_data(datasets;
         # Continuous measures
         for (src, col, name) in CONTINUOUS_COG_MEASURES
             if include_cont[t][col]
-                vals, n_bins = _encode_continuous_panel(kids_final, N,
-                    cont_dfs[t][src], cont_idx[t][src], col, cutoffs[col])
+                vals, n_bins = cont_bins_per_period > 0 ?
+                    (cont_bins_by_age ?
+                        _encode_continuous_panel_qage(kids_final, N, cont_dfs[t][src], cont_idx[t][src], col, cont_bins_per_period) :
+                        _encode_continuous_panel_q(kids_final, N, cont_dfs[t][src], cont_idx[t][src], col, cont_bins_per_period)) :
+                    _encode_continuous_panel(kids_final, N, cont_dfs[t][src], cont_idx[t][src], col, cutoffs[col])
                 push!(X_θ, vals)
                 push!(κ_θ, n_bins)
                 push!(names_θ, name)

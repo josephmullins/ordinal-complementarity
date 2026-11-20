@@ -1,0 +1,139 @@
+Loading all datasets...
+  MSD:             173175 rows
+  PPVT:            173175 rows
+  PIAT:            34697 rows
+  DigitSpan:       14194 rows
+  HOME:            53342 rows
+  ParentSkills:    12686 rows (12686 mothers)
+  HouseholdIncome: 219021 rows (12659 mothers, 28 years)
+  AdultOutcomes:   11545 rows
+Computing pooled cutoffs (10 bins)...
+  ASVAB_ARITH: 10 bins, cutoffs = [7.0, 9.0, 11.0, 12.0, 15.0, 17.0, 20.0, 23.0, 27.0]
+  ASVAB_CODING: 10 bins, cutoffs = [18.0, 28.0, 35.0, 40.0, 44.0, 48.0, 52.0, 56.0, 62.0]
+  ASVAB_MATH: 10 bins, cutoffs = [5.0, 6.0, 8.0, 9.0, 11.0, 12.0, 15.0, 18.0, 22.0]
+  ASVAB_NUMER: 10 bins, cutoffs = [16.0, 22.0, 26.0, 29.0, 32.0, 35.0, 39.0, 43.0, 48.0]
+  ASVAB_PARA: 9 bins, cutoffs = [4.0, 6.0, 8.0, 10.0, 11.0, 12.0, 13.0, 14.0]
+  ASVAB_WORD: 10 bins, cutoffs = [11.0, 15.0, 19.0, 22.0, 25.0, 28.0, 30.0, 32.0, 34.0]
+  COMP: 10 bins, cutoffs = [17.0, 20.0, 26.0, 33.0, 40.0, 44.0, 48.0, 52.0, 59.0]
+  DIGITB: 7 bins, cutoffs = [2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
+  DIGITF: 7 bins, cutoffs = [4.0, 5.0, 6.0, 7.0, 8.0, 9.0]
+  MATH: 10 bins, cutoffs = [13.0, 19.0, 27.0, 36.0, 42.0, 45.0, 49.0, 53.0, 62.0]
+  PPVTRaw: 10 bins, cutoffs = [25.0, 42.0, 54.0, 70.0, 84.0, 96.0, 105.0, 112.0, 121.0]
+  RECOG: 10 bins, cutoffs = [17.0, 21.0, 28.0, 36.0, 42.0, 47.0, 54.0, 60.0, 69.0]
+
+  Preparing panel data: T=7 periods
+    Period 1: ages (0, 1)
+    Period 2: ages (2, 3)
+    Period 3: ages (4, 5)
+    Period 4: ages (6, 7)
+    Period 5: ages (8, 9)
+    Period 6: ages (10, 11)
+    Period 7: ages (12, 13)
+    Period 1: MSD=120 items, PPVTRaw=false, MATH=false, RECOG=false, COMP=false, DIGITF=false, DIGITB=false
+    Period 2: MSD=60 items, PPVTRaw=true, MATH=false, RECOG=false, COMP=false, DIGITF=false, DIGITB=false
+    Period 3: MSD=15 items, PPVTRaw=true, MATH=false, RECOG=false, COMP=false, DIGITF=false, DIGITB=false
+    Period 4: MSD=0 items, PPVTRaw=true, MATH=true, RECOG=true, COMP=true, DIGITF=true, DIGITB=true
+    Period 5: MSD=0 items, PPVTRaw=true, MATH=true, RECOG=true, COMP=true, DIGITF=true, DIGITB=true
+    Period 6: MSD=0 items, PPVTRaw=true, MATH=true, RECOG=true, COMP=true, DIGITF=true, DIGITB=true
+    Period 7: MSD=0 items, PPVTRaw=true, MATH=true, RECOG=true, COMP=true, DIGITF=true, DIGITB=true
+  Sample:
+    Period 1: 4140 with cognitive, 4296 with investment (4315 any)
+    Period 2: 6321 with cognitive, 6518 with investment (6548 any)
+    Period 3: 5860 with cognitive, 7271 with investment (7325 any)
+    Period 4: 7285 with cognitive, 7719 with investment (7791 any)
+    Period 5: 7365 with cognitive, 7862 with investment (7940 any)
+    Period 6: 7333 with cognitive, 7856 with investment (7941 any)
+    Period 7: 6918 with cognitive, 7564 with investment (7660 any)
+    Children with ≥2 periods: 9685
+    Final panel: N = 9685
+    KID→MID matched: 9685 / 9685 children
+
+  Period 1:
+    Cognitive measures: 120
+      Non-missing: min=29, median=599, max=766
+    Investment measures: 7
+      Non-missing: min=3999, median=4005, max=4046
+
+  Period 2:
+    Cognitive measures: 61
+      Non-missing: min=67, median=556, max=5302
+    Investment measures: 15
+      Non-missing: min=1312, median=1868, max=6351
+
+  Period 3:
+    Cognitive measures: 16
+      Non-missing: min=1515, median=1526, max=5143
+    Investment measures: 7
+      Non-missing: min=4886, median=7139, max=7183
+
+  Period 4:
+    Cognitive measures: 6
+      Non-missing: min=1342, median=4748, max=7181
+    Investment measures: 16
+      Non-missing: min=5088, median=5932, max=7649
+
+  Period 5:
+    Cognitive measures: 6
+      Non-missing: min=2150, median=5952, max=7246
+    Investment measures: 17
+      Non-missing: min=6685, median=7744, max=7772
+
+  Period 6:
+    Cognitive measures: 6
+      Non-missing: min=5630, median=6646, max=7238
+    Investment measures: 20
+      Non-missing: min=5720, median=7528, max=7767
+
+  Period 7:
+    Cognitive measures: 6
+      Non-missing: min=1986, median=4352, max=6756
+    Investment measures: 20
+      Non-missing: min=6904, median=7326, max=7356
+
+  Parental skill measures (ASVAB, cross-sectional): 6
+    ASVAB_ARITH: κ=10, non-missing=9296/9685
+    ASVAB_WORD: κ=10, non-missing=9296/9685
+    ASVAB_PARA: κ=9, non-missing=9296/9685
+    ASVAB_NUMER: κ=10, non-missing=9296/9685
+    ASVAB_CODING: κ=10, non-missing=9296/9685
+    ASVAB_MATH: κ=10, non-missing=9296/9685
+
+  Household income (log, N×T): 44235 / 67795 child-periods observed
+    Period 1: 4435/9685 obs, mean log-inc=10.69
+    Period 2: 5474/9685 obs, mean log-inc=10.62
+    Period 3: 6407/9685 obs, mean log-inc=10.6
+    Period 4: 6954/9685 obs, mean log-inc=10.59
+    Period 5: 7105/9685 obs, mean log-inc=10.59
+    Period 6: 7050/9685 obs, mean log-inc=10.62
+    Period 7: 6810/9685 obs, mean log-inc=10.64
+
+  Adult outcomes (cross-sectional):
+    HS: κ=2, non-missing=8142/9685
+    College: κ=2, non-missing=7310/9685
+    EarnQ: κ=5, non-missing=4971/9685
+    AlwaysEmp: κ=2, non-missing=4971/9685
+Investment measures grouped: [3, 5, 3, 5, 5, 7, 7] per period
+TIDY: 7 sparse/empty categories merged; stalled-emission restart ON
+
+====================================================================================================
+GROUPED   fit estimation_v3_eps_ordrobit_pertheta_rI4_noPIAT3_grp_q5a_tidy_seed1.jld2   boot bootstrap_ordrobit_rI4_noPIAT3_grp_q5a_tidy.jld2 (B ok = 500)
+====================================================================================================
+Score rows: 824 total, 820 active, 4 inactive
+Max |mean score| across params: 0.008356065845996357  (should be ~0 at MLE)
+Effective rank: 806 / 820
+  scores + OPG: 0.2 min;  params 824, active 820, effective rank 806, cond 1.68e+20, max|mean score| 8.36e-03
+  β₅/δ = 9.950   SE: asym 10-block 0.430 | asym 4-block 0.367 | bootstrap 0.920
+  -- ages 0–5   (max |S_hat − S(Π̄ stored)| = 2.2e-16)
+  survivor, 10-block                 n= 48  median asym/boot 0.75  [p10 0.52, p90 0.90]  corr(SE) 0.97  mean SE asym 0.0171 boot 0.0228
+  survivor, 4-block                  n= 48  median asym/boot 0.67  [p10 0.46, p90 0.81]  corr(SE) 0.97  mean SE asym 0.0154 boot 0.0228
+  cross-diff, 10-block               n= 27  median asym/boot 0.79  [p10 0.75, p90 0.93]  corr(SE) 0.99  mean SE asym 0.0196 boot 0.0234
+  cross-diff, 4-block                n= 27  median asym/boot 0.72  [p10 0.68, p90 0.85]  corr(SE) 0.99  mean SE asym 0.0179 boot 0.0234
+     cross-diffs |x̂| > 1.645·SE:  asym 13, boot 12, agree 26/27
+  -- ages 6–13   (max |S_hat − S(Π̄ stored)| = 3.3e-16)
+  survivor, 10-block                 n= 48  median asym/boot 0.65  [p10 0.52, p90 0.86]  corr(SE) 0.97  mean SE asym 0.0074 boot 0.0116
+  survivor, 4-block                  n= 48  median asym/boot 0.60  [p10 0.48, p90 0.78]  corr(SE) 0.97  mean SE asym 0.0068 boot 0.0116
+  cross-diff, 10-block               n= 27  median asym/boot 0.95  [p10 0.75, p90 1.02]  corr(SE) 0.98  mean SE asym 0.0087 boot 0.0099
+  cross-diff, 4-block                n= 27  median asym/boot 0.91  [p10 0.71, p90 0.96]  corr(SE) 0.98  mean SE asym 0.0082 boot 0.0099
+     cross-diffs |x̂| > 1.645·SE:  asym 24, boot 24, agree 27/27
+
+Saved → output/asymptotic_vs_boot_rI4_noPIAT3_grp_q5a_tidy.jld2

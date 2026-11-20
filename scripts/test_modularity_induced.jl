@@ -86,7 +86,7 @@ for (g, _) in enumerate(TG), (lab, _) in specs, set in ("full", "adjacent")
                     r.T_sub, r.reject_sub, r.c, r.n_comp, r.n_comp_sig, r.n_sub, r.n_sub_sig,
                     r.worst_sub, r.strongest_comp))
 end
-outdir = joinpath(REPO, "output", "paper_tables_boot")
+outdir = joinpath(REPO, get(ENV, "OUTDIR", "output/paper_tables_boot"))
 isdir(outdir) || mkpath(outdir)
 CSV.write(joinpath(outdir, "modularity_induced.csv"), records)
 println("\nsaved ", joinpath(outdir, "modularity_induced.csv"))

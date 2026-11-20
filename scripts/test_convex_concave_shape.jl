@@ -173,7 +173,7 @@ function print_table(title, df)
     end
 end
 
-outdir = joinpath(REPO, "output", "paper_tables_boot")
+outdir = joinpath(REPO, get(ENV, "OUTDIR", "output/paper_tables_boot"))
 isdir(outdir) || mkpath(outdir)
 
 df_tr, _  = build_table(:transition)

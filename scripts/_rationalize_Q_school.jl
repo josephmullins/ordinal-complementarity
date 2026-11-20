@@ -10,6 +10,8 @@ const G = parse(Int, get(ENV, "GROUP", "2"))
 const SENSE = Symbol(get(ENV, "SENSE", "max"))   # :max = closest to supermodular (t⁺), :min = closest to submodular (t⁻)
 const TLAB = SENSE === :max ? "t̂⁺" : "t̂⁻"
 const WORD = SENSE === :max ? "complementarity" : "substitutability"
+const SHAPE = Symbol(get(ENV, "SHAPE", "none"))  # :none, :convex, :concave restriction on Q
+const SHLAB = SHAPE === :none ? "" : "$(SHAPE) "
 bc = load(joinpath(@__DIR__, "..", "output", "bootstrap_reg.jld2"))
 ok = findall(bc["ok"]); r_θ = bc["r_θ"]; r_I = bc["r_I"]
 Πof(v) = reconstruct_Pi(v, r_θ, r_I)[1]
@@ -20,12 +22,12 @@ basic(x̂, xb) = (2x̂ - quantile(xb, .975), 2x̂ - quantile(xb, .025))
 
 Π̂ = Πof(bc["pibar0"][G]); Πb = [Πof(bc["boot_pibar"][G][b, :]) for b in ok]
 _, D̂ = gap_matrices(Π̂)
-t̂, α̂, _, bind = solve_shape_lp(D̂; sense = SENSE)
+t̂, α̂, _, bind = solve_shape_lp(D̂; sense = SENSE, shape = SHAPE)
 Q̂ = Q_from_alpha(α̂)
 @printf("GROUP %d  %s  t̂ = %+.5f   α̂ = %s   Q̂(1..%d) = %s\n", G, SENSE, t̂, round.(α̂; digits = 3), r_θ, round.(Q̂; digits = 3))
 
 # stability of the selected valuation across bootstrap draws
-αb = [solve_shape_lp(gap_matrices(P)[2]; sense = SENSE)[2] for P in Πb]
+αb = [solve_shape_lp(gap_matrices(P)[2]; sense = SENSE, shape = SHAPE)[2] for P in Πb]
 A = reduce(hcat, αb)'
 println("\nRe-optimized α*_b across draws (mean, 2.5%, 97.5%):")
 for j in 1:size(A, 2)
@@ -67,7 +69,7 @@ Qb = reduce(hcat, [Q_from_alpha(a) for a in αb])'
 lo_q = [quantile(Qb[:, s], .025) for s in 1:r_θ]; hi_q = [quantile(Qb[:, s], .975) for s in 1:r_θ]
 pA = plot(1:r_θ, Q̂; ribbon = (Q̂ .- lo_q, hi_q .- Q̂), fillalpha = 0.2, color = PAL_RUST, lw = 3,
           marker = :circle, ms = 6, label = "Q̂ (band: re-solved on each draw)",
-          xlabel = "future skill θ′", ylabel = "Q(θ′)", title = "(a) Valuation closest to $WORD",
+          xlabel = "future skill θ′", ylabel = "Q(θ′)", title = "(a) $(uppercasefirst(SHLAB))valuation closest to $WORD",
           xticks = 1:r_θ, ylims = (-0.02, 1.05), legend = :topleft)
 plot!(pA, 1:r_θ, range(0, 1; length = r_θ); ls = :dash, color = PAL_GREY, lw = 2, label = "linear Q")
 
@@ -104,8 +106,8 @@ ylims!(pC, (min(minimum(X̂), 0) - 0.04, max(maximum(X̂), 0) + 0.04))
 let R = [V̂[p, q] - V̂[p, 1] for p in 1:r_θ, q in 1:r_I]; ylims!(pB, (min(minimum(R), 0) - 0.03, maximum(R) + 0.03)); end
 
 fig = plot(pA, pB, pC; layout = (1, 3), size = (1900, 600), left_margin = 16Plots.mm, right_margin = 4Plots.mm,
-           bottom_margin = 14Plots.mm, top_margin = 4Plots.mm, plot_title = "Valuation closest to $WORD, $gl ($TLAB = $(round(t̂; digits=4)))")
+           bottom_margin = 14Plots.mm, top_margin = 4Plots.mm, plot_title = "$(uppercasefirst(SHLAB))valuation closest to $WORD, $gl ($TLAB = $(round(t̂; digits=4)))")
 outdir = joinpath(@__DIR__, "..", "figures"); isdir(outdir) || mkpath(outdir)
-stem = joinpath(outdir, "rationalize_Q_group$(G)_$(SENSE)")
+stem = joinpath(outdir, "rationalize_Q_group$(G)_$(SENSE)" * (SHAPE === :none ? "" : "_$(SHAPE)"))
 savefig(fig, stem * ".pdf"); savefig(fig, stem * ".png")
 println("Saved → ", stem, ".{pdf,png}")

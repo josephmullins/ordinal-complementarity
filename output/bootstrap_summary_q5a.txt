@@ -1,0 +1,25 @@
+┌ Warning: type Main.OrderedRobitPerThetaV3 does not exist in workspace; reconstructing
+└ @ JLD2 ~/.julia/packages/JLD2/hbsZG/src/data/reconstructing_datatypes.jl:588
+┌ Warning: type Main.OrderedProbitCCPV3Eps does not exist in workspace; reconstructing
+└ @ JLD2 ~/.julia/packages/JLD2/hbsZG/src/data/reconstructing_datatypes.jl:588
+┌ Warning: type Main.OrderedProbitEmission does not exist in workspace; reconstructing
+└ @ JLD2 ~/.julia/packages/JLD2/hbsZG/src/data/reconstructing_datatypes.jl:588
+┌ Warning: type Main.IncomeModelEps does not exist in workspace; reconstructing
+└ @ JLD2 ~/.julia/packages/JLD2/hbsZG/src/data/reconstructing_datatypes.jl:588
+┌ Warning: type Main.AdultOutcomeEmission does not exist in workspace; reconstructing
+└ @ JLD2 ~/.julia/packages/JLD2/hbsZG/src/data/reconstructing_datatypes.jl:588
+┌ Warning: type parameters for NamedTuple{(:r_P, :r_ω, :r_Y, :π0, :π_Pω, :π_ε, :trans_specs, :ccp_spec, :probit_P, :Q_P, :income_model, :adult_emission, :adult_matrices),Tuple} do not match type NamedTuple in workspace; reconstructing
+└ @ JLD2 ~/.julia/packages/JLD2/hbsZG/src/data/reconstructing_datatypes.jl:574
+┌ Warning: type Main.OrderedRobitPerThetaV3 does not exist in workspace; interpreting Array{Main.OrderedRobitPerThetaV3} as Array{Any}
+└ @ JLD2 ~/.julia/packages/JLD2/hbsZG/src/datasets.jl:128
+500/500 resamples ok
+β₅/δ = 9.950  (boot SE 0.920, 90% [8.93, 11.94])
+latent I shares [0.076, 0.276, 0.391, 0.257]  SE [0.008, 0.01, 0.009, 0.012]
+grouped 0–5    survivor SE mean 0.023 max 0.077 | cross-diffs with 90% interval > 0:  9, < 0:  3 of 27  −(k2,θ1,I1) −(k2,θ1,I2) −(k2,θ1,I3) +(k2,θ3,I1) +(k3,θ3,I1) +(k3,θ3,I2) +(k4,θ1,I1) +(k4,θ1,I2) +(k4,θ2,I1) +(k4,θ3,I1) +(k4,θ3,I2) +(k4,θ3,I3)
+grouped 6–13   survivor SE mean 0.012 max 0.071 | cross-diffs with 90% interval > 0: 12, < 0: 12 of 27  −(k2,θ1,I1) −(k2,θ1,I2) −(k2,θ1,I3) −(k2,θ2,I1) −(k2,θ2,I2) −(k2,θ2,I3) −(k2,θ3,I1) −(k2,θ3,I2) −(k2,θ3,I3) +(k3,θ1,I1) +(k3,θ1,I2) +(k3,θ1,I3) −(k3,θ3,I1) −(k3,θ3,I2) −(k3,θ3,I3) +(k4,θ1,I1) +(k4,θ1,I2) +(k4,θ1,I3) +(k4,θ2,I1) +(k4,θ2,I2) +(k4,θ2,I3) +(k4,θ3,I1) +(k4,θ3,I2) +(k4,θ3,I3)
+period 1→2     survivor SE mean 0.023 max 0.071 | cross-diffs with 90% interval > 0: 12, < 0:  4 of 27  −(k2,θ1,I1) −(k2,θ1,I2) −(k2,θ1,I3) +(k2,θ3,I1) −(k2,θ3,I3) +(k3,θ1,I1) +(k3,θ3,I1) +(k3,θ3,I2) +(k4,θ1,I1) +(k4,θ1,I2) +(k4,θ2,I1) +(k4,θ2,I2) +(k4,θ2,I3) +(k4,θ3,I1) +(k4,θ3,I2) +(k4,θ3,I3)
+period 2→3     survivor SE mean 0.022 max 0.075 | cross-diffs with 90% interval > 0: 10, < 0:  4 of 27  −(k2,θ1,I1) −(k2,θ1,I2) −(k2,θ1,I3) −(k2,θ2,I3) +(k2,θ3,I1) +(k3,θ1,I1) +(k3,θ3,I1) +(k3,θ3,I2) +(k4,θ1,I1) +(k4,θ1,I2) +(k4,θ2,I1) +(k4,θ3,I1) +(k4,θ3,I2) +(k4,θ3,I3)
+period 3→4     survivor SE mean 0.023 max 0.084 | cross-diffs with 90% interval > 0:  8, < 0:  3 of 27  −(k2,θ1,I1) −(k2,θ1,I2) −(k2,θ1,I3) +(k2,θ3,I1) +(k2,θ3,I2) +(k3,θ3,I1) +(k3,θ3,I2) +(k3,θ3,I3) +(k4,θ3,I1) +(k4,θ3,I2) +(k4,θ3,I3)
+period 4→5     survivor SE mean 0.013 max 0.072 | cross-diffs with 90% interval > 0: 12, < 0: 11 of 27  −(k2,θ1,I2) −(k2,θ1,I3) −(k2,θ2,I1) −(k2,θ2,I2) −(k2,θ2,I3) −(k2,θ3,I1) −(k2,θ3,I2) −(k2,θ3,I3) +(k3,θ1,I1) +(k3,θ1,I2) +(k3,θ1,I3) −(k3,θ3,I1) −(k3,θ3,I2) −(k3,θ3,I3) +(k4,θ1,I1) +(k4,θ1,I2) +(k4,θ1,I3) +(k4,θ2,I1) +(k4,θ2,I2) +(k4,θ2,I3) +(k4,θ3,I1) +(k4,θ3,I2) +(k4,θ3,I3)
+period 5→6     survivor SE mean 0.011 max 0.071 | cross-diffs with 90% interval > 0: 12, < 0: 12 of 27  −(k2,θ1,I1) −(k2,θ1,I2) −(k2,θ1,I3) −(k2,θ2,I1) −(k2,θ2,I2) −(k2,θ2,I3) −(k2,θ3,I1) −(k2,θ3,I2) −(k2,θ3,I3) +(k3,θ1,I1) +(k3,θ1,I2) +(k3,θ1,I3) −(k3,θ3,I1) −(k3,θ3,I2) −(k3,θ3,I3) +(k4,θ1,I1) +(k4,θ1,I2) +(k4,θ1,I3) +(k4,θ2,I1) +(k4,θ2,I2) +(k4,θ2,I3) +(k4,θ3,I1) +(k4,θ3,I2) +(k4,θ3,I3)
+period 6→7     survivor SE mean 0.010 max 0.068 | cross-diffs with 90% interval > 0:  6, < 0:  9 of 27  −(k2,θ1,I1) −(k2,θ1,I2) −(k2,θ1,I3) −(k2,θ3,I1) −(k2,θ3,I2) −(k2,θ3,I3) −(k3,θ3,I1) −(k3,θ3,I2) −(k3,θ3,I3) +(k4,θ2,I1) +(k4,θ2,I2) +(k4,θ2,I3) +(k4,θ3,I1) +(k4,θ3,I2) +(k4,θ3,I3)

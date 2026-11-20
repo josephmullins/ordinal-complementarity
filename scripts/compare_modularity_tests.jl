@@ -57,6 +57,9 @@ let D = -get_S_adjacent(r_θ, n_y)
         m = D * Π_vec; V = D * Vfree * D'
         dV = diag(V); tol = 1e-10 * max(maximum(dV), 1.0)
         keep = findall(>(tol), dV)
+        if isempty(keep)   # object flat in the conditioning variable in every draw: nothing to test
+            rsw_ind[(g, "super")] = (0.0, false, 0); rsw_ind[(g, "sub")] = (0.0, false, 0); continue
+        end
         mk = m[keep]; Vk = V[keep, keep]; dk = dV[keep]
         Dinv = diagm(1.0 ./ sqrt.(dk))
         Ω = Matrix(Symmetric(Dinv * Vk * Dinv))

@@ -64,6 +64,23 @@ const PANEL_INVEST_ITEMS_NB = [
 ]
 
 const REG_RUN  = get(ENV, "REG_RUN", "0") == "1"
+const BOOT_ONLY = get(ENV, "BOOT_ONLY", "0") == "1"   # 2026-11-18: Π̄ AND covariance from BOOT_COV (any technology spec)
+if BOOT_ONLY
+    bc = load(ENV["BOOT_COV"]); okb = findall(bc["ok"]); r_θ = bc["r_θ"]; r_I = bc["r_I"]; T = 7
+    println("BOOT_ONLY: Π̄ and Var_free from ", ENV["BOOT_COV"], "  (n_ok=$(length(okb)), r_I=$r_I)")
+    nfree = (r_θ - 1) * r_θ * r_I
+    Pi_bar = Vector{Array{Float64,3}}(undef, T - 1); Var_free_list = [zeros(nfree, nfree) for _ in 1:(T - 1)]
+    for (g, group) in enumerate(TRANSITION_GROUPS)
+        v = bc["pibar0"][g]; Π = zeros(r_θ, r_θ, r_I); i = 0
+        for kI in 1:r_I, kθ in 1:r_θ
+            for j in 1:r_θ-1; i += 1; Π[j, kθ, kI] = v[i]; end
+            Π[r_θ, kθ, kI] = 1 - sum(Π[1:r_θ-1, kθ, kI])
+        end
+        for t in group; Pi_bar[t] = Π; end
+        Var_free_list[group[1]] = cov(bc["boot_pibar"][g][okb, :])
+    end
+else
+
 const FIT_PATH = get(ENV, "FIT_OVERRIDE", joinpath(REPO, "output", "estimation_v3_eps_reg.jld2"))
 println("Loading fit: ", FIT_PATH, " ...")
 fit = load(FIT_PATH)
@@ -96,6 +113,8 @@ else
     inf = compute_var_phi_v3_eps(pv3, psk, data_nb; transition_groups = TRANSITION_GROUPS, verbose = false)
     Var_free_list, Pi_bar = delta_cov_Pi_bar_free(inf, pv3, psk; transition_groups = TRANSITION_GROUPS)
 end
+
+end   # BOOT_ONLY
 
 # ============================================================================
 # Two constraint sets (FULL pairwise vs ADJACENT unit-cell), and BOTH one-sided
@@ -265,12 +284,13 @@ for (g, _) in enumerate(TRANSITION_GROUPS), (lab, _) in specs
     r = res[(g, lab, "adjacent")]
     @printf "  %-9s %-8s | T=%7.2f  c_LF=%6.2f  c_RSW=%6.2f   %s→%s\n" GROUP_LABELS[g] lab r.T_super r.c r.c_rsw_super (r.reject_super ? "REJ" : "no") (r.reject_super_rsw ? "REJ" : "no")
 end
-outdir = joinpath(REPO, "output",
+outdir = haskey(ENV, "OUTDIR") ? joinpath(REPO, ENV["OUTDIR"]) : joinpath(REPO, "output",
     haskey(ENV,"BOOT_COV") ? "paper_tables_boot" : (REG_RUN ? "paper_tables_reg" : "paper_tables"))
 isdir(outdir) || mkpath(outdir)
 CSV.write(joinpath(outdir, "supermodularity_by_cutpoint.csv"), records)
 println("\nsaved ", joinpath(outdir, "supermodularity_by_cutpoint.csv"))
 
+BOOT_ONLY && exit(0)
 # ── Validation: corrected SOURCE get_test_stat_v3_grouped vs standalone adjacent "all" ──
 println("\n" * "="^104)
 println("VALIDATION — src get_test_stat_v3_grouped(corrected) should match standalone ADJACENT 'all'")

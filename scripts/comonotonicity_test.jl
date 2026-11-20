@@ -516,7 +516,7 @@ function run_databoot(; bootfile = get(ENV, "COMONO_BOOT",
             end
         end
     end
-    tabdir = joinpath(@__DIR__, "..", "output", "paper_tables_boot"); isdir(tabdir) || mkpath(tabdir)
+    tabdir = joinpath(@__DIR__, "..", get(ENV, "OUTDIR", "output/paper_tables_boot")); isdir(tabdir) || mkpath(tabdir)
     csvpath = joinpath(tabdir, induced ? "comonotonicity_test_induced.csv" : "comonotonicity_test.csv")
     open(csvpath, "w") do io; for r in csv_rows; println(io, r); end; end
     println("\nSaved → ", csvpath)
@@ -566,7 +566,7 @@ function run_ndm(; bootfile = get(ENV, "COMONO_BOOT",
             end
         end
     end
-    tabdir = joinpath(@__DIR__, "..", "output", "paper_tables_boot"); isdir(tabdir) || mkpath(tabdir)
+    tabdir = joinpath(@__DIR__, "..", get(ENV, "OUTDIR", "output/paper_tables_boot")); isdir(tabdir) || mkpath(tabdir)
     csvpath = joinpath(tabdir, induced ? "comonotonicity_test_ndm_induced.csv" : "comonotonicity_test_ndm.csv")
     open(csvpath, "w") do io; foreach(r -> println(io, r), rows); end
     println("\nSaved → ", csvpath)

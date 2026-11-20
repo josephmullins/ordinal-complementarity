@@ -971,6 +971,37 @@ Optimize ordered probit emission parameters for all periods.
 For each period t, extracts marginal weights from γ[t,:,:,:] and optimizes
 each measure independently via _single_measure_negll (from parametric_models.jl).
 """
+
+# ── Stalled-cutpoint restart (2026-11-18, opt-in) ──
+# ordered_probit_matrix floors probabilities at 1e-12; once an OBSERVED category's
+# probability is below the floor in every latent class, its gradient is exactly zero and
+# BFGS never brings it back (seen: HowOftenTalks t=2 with τ3 = τ4 = 9.81, 64 children at
+# log(1e-12) each). When that happens, re-optimize from cutpoints matched to the observed
+# category frequencies (keeping the loading) and keep whichever has the lower objective.
+import Distributions
+const EMISSION_STALL_RESTART = Ref(false)
+const EMISSION_STALL_COUNT = Ref(0)
+function _restart_if_stalled(obj, xopt, W, X_m, κ, r; options = DEFAULT_OPTIM_OPTIONS)
+    n_cut = κ - 1
+    P = ordered_probit_matrix(_unpack_cutpoints(xopt[1:n_cut]), xopt[n_cut + 1], r)
+    cnt = [count(==(c), X_m) for c in 1:κ]
+    any(c -> cnt[c] > 0 && maximum(P[c, :]) < 1e-8, 1:κ) || return xopt
+    α = xopt[n_cut + 1]
+    obs = findall(>(0), X_m)
+    zbar = α * sum(W[k, n] * k for n in obs, k in 1:r) / max(sum(W[:, obs]), 1e-12)
+    cum = cumsum(max.(cnt, 0.5))[1:n_cut] ./ sum(max.(cnt, 0.5))
+    τ0 = [Distributions.quantile(Normal(), clamp(q, 1e-4, 1 - 1e-4)) for q in cum] .+ zbar
+    for k in 2:n_cut; τ0[k] = max(τ0[k], τ0[k - 1] + 1e-3); end
+    x1 = vcat(_pack_cutpoints(τ0), α)
+    x2 = try
+        Optim.minimizer(optimize(obj, x1, BFGS(), options; autodiff = :forward))
+    catch
+        x1
+    end
+    EMISSION_STALL_COUNT[] += 1
+    obj(x2) < obj(xopt) ? x2 : xopt
+end
+
 function parametric_mstep_emission_mp(specs_list::Vector{OrderedProbitEmission},
                                        γ::Array{Float64,4},
                                        data, field::Symbol, r::Int;
@@ -1018,6 +1049,9 @@ function parametric_mstep_emission_mp(specs_list::Vector{OrderedProbitEmission},
                 # fall back to NelderMead which doesn't need gradients
                 result = optimize(obj, x0, NelderMead(), options)
                 Optim.minimizer(result)
+            end
+            if EMISSION_STALL_RESTART[]
+                xopt = _restart_if_stalled(obj, xopt, W, X_measures[m], κ_list[m], r)
             end
             new_tau[m] = _unpack_cutpoints(xopt[1:n_cut])
             new_alpha[m] = xopt[n_cut + 1]

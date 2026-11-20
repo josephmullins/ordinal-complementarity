@@ -1,0 +1,10 @@
+kink DGP: shrink w = 0.50, shift λ = 0.0061, min Π = 0.0130
+R = 400 replications, 300 NDM draws each, N = 9685, nominal 5%
+
+kink (early-age Π̄, w=0.5, shifted to t⁺ = 0; V of ages 0–5)   true t⁺ = -0.00e+00, t⁻ = +3.47e-02
+  ε = N^-1/3:  t⁺ orig 0.070   t⁺ flip 0.087   t⁻ orig 0.525   t⁻ flip 0.080   
+  ε = N^-1/4:  t⁺ orig 0.035   t⁺ flip 0.135   t⁻ orig 0.535   t⁻ flip 0.070   
+
+modular (school-age base, V of ages 6–13)   true t⁺ = -0.00e+00, t⁻ = -0.00e+00
+  ε = N^-1/3:  t⁺ orig 0.048   t⁺ flip 0.058   t⁻ orig 0.077   t⁻ flip 0.070   
+  ε = N^-1/4:  t⁺ orig 0.043   t⁺ flip 0.052   t⁻ orig 0.068   t⁻ flip 0.040   
